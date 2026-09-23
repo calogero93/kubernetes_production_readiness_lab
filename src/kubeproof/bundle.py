@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from kubeproof.domain import EvaluationResult, SourceClass, StrictModel
+from kubeproof.profile import CompanyProfile
 from kubeproof.report import render_markdown
 
 
@@ -119,12 +120,20 @@ def verify_bundle(root: Path) -> BundleVerification:
         raise BundleError("report.md is not the deterministic rendering of evaluation.json")
     if _sha256_file(root / "profile.normalized.json") != evaluation.input.profile_sha256:
         raise BundleError("profile snapshot does not match the evaluation input identity")
+    try:
+        profile = CompanyProfile.model_validate_json(
+            (root / "profile.normalized.json").read_bytes()
+        )
+    except (OSError, ValidationError, ValueError) as exc:
+        raise BundleError(f"invalid normalized profile snapshot: {exc}") from exc
+    if profile.name != evaluation.profile_name:
+        raise BundleError("profile snapshot name does not match the evaluation")
     for observation in evaluation.observations:
         if observation.source_class is SourceClass.STATIC_INPUT:
             if observation.provenance is None or (
                 observation.provenance.source_sha256
                 != evaluation.input.rendered_manifest_sha256
-            ):
+            ) or observation.provenance.source_ref != "input:rendered-manifest":
                 raise BundleError(f"static observation {observation.id} has invalid provenance")
         elif observation.source_class is SourceClass.RUNTIME and (
             evaluation.environment is None

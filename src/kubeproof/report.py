@@ -53,6 +53,11 @@ def render_markdown(evaluation: EvaluationResult) -> str:
             lines.append(
                 f"- Kubernetes server: `{evaluation.environment.kubernetes_server_version}`"
             )
+        if evaluation.environment.metrics_server_manifest_sha256:
+            lines.append(
+                "- Metrics Server manifest SHA-256: "
+                f"`{evaluation.environment.metrics_server_manifest_sha256}`"
+            )
         if evaluation.environment.cleanup_error:
             lines.append(f"- Cleanup error: {evaluation.environment.cleanup_error}")
         if evaluation.environment.leftovers_before_cluster_deletion:

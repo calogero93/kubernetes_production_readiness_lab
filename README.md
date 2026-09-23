@@ -66,3 +66,18 @@ projection and can be rebuilt at any time:
 ```bash
 uv run kubeproof history sync --data-dir ./.kubeproof
 ```
+
+New bundles include file and observation digests. Check one offline with:
+
+```bash
+uv run kubeproof verify ./kubeproof-run
+```
+
+Compare two sealed evaluations under the documented repeatability tolerances:
+
+```bash
+uv run kubeproof compare ./first-run ./second-run
+```
+
+See the [evidence bundle contract](docs/v0.1/evidence.md) for provenance,
+integrity limits and runtime reproducibility criteria.

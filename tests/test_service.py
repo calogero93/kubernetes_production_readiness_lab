@@ -5,9 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from kubeproof.bundle import BundleError, canonical_json_bytes, verify_bundle, write_bundle
-from kubeproof.domain import SourceClass
+from kubeproof.domain import EvaluationResult, SourceClass
 from kubeproof.helm import HelmRenderRequest, HelmRenderResult
 from kubeproof.history import HistoryError, HistoryService
 from kubeproof.profile import CompanyProfile
@@ -83,6 +84,7 @@ spec:
         if observation.source_class is SourceClass.STATIC_INPUT
         and observation.provenance is not None
     )
+    assert all(check.experiment_version == "1" for check in evaluation.checks)
     assert not tuple(tmp_path.glob(".bundle.tmp-*"))
     assert all(
         check["assessment"] != "pass"
@@ -235,6 +237,50 @@ def test_observation_seal_detects_modified_evidence_with_updated_file_hash(
         verify_bundle(output)
 
 
+def test_report_must_match_evaluation_even_with_updated_file_hash(
+    tmp_path: Path, strict_profile: CompanyProfile
+) -> None:
+    output = tmp_path / "bundle"
+    inspect_chart(
+        chart="./chart",
+        version="1.0.0",
+        profile=strict_profile,
+        values_files=(),
+        set_values=(),
+        output=output,
+        renderer=FakeRenderer(b"apiVersion: v1\nkind: ConfigMap\nmetadata: {name: example}\n"),
+    )
+    report_path = output / "report.md"
+    report = report_path.read_text().replace("# KubeProof evaluation", "# Changed conclusion")
+    report_path.write_text(report)
+    manifest_path = output / "bundle-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"]["report.md"] = hashlib.sha256(report.encode()).hexdigest()
+    manifest_path.write_bytes(canonical_json_bytes(manifest))
+
+    with pytest.raises(BundleError, match="deterministic rendering"):
+        verify_bundle(output)
+
+
+def test_schema_02_rejects_observation_with_wrong_source_class(
+    tmp_path: Path, strict_profile: CompanyProfile
+) -> None:
+    evaluation = inspect_chart(
+        chart="./chart",
+        version="1.0.0",
+        profile=strict_profile,
+        values_files=(),
+        set_values=(),
+        output=tmp_path / "bundle",
+        renderer=FakeRenderer(b"apiVersion: v1\nkind: ConfigMap\nmetadata: {name: example}\n"),
+    )
+    payload = evaluation.model_dump(mode="json")
+    payload["observations"][0]["source_class"] = "runtime"
+
+    with pytest.raises(ValidationError, match="mismatched source class"):
+        EvaluationResult.model_validate(payload)
+
+
 def test_bundle_rejects_unlisted_artifact(
     tmp_path: Path, strict_profile: CompanyProfile
 ) -> None:
@@ -284,3 +330,31 @@ def test_artifact_hash_is_checked_on_history_import(
         verify_bundle(with_artifact)
     with pytest.raises(HistoryError, match="failed SHA-256"):
         HistoryService.local(tmp_path / "history").import_bundle(with_artifact)
+
+
+def test_same_evaluation_id_cannot_replace_sealed_artifacts(
+    tmp_path: Path, strict_profile: CompanyProfile
+) -> None:
+    initial = tmp_path / "initial"
+    evaluation = inspect_chart(
+        chart="./chart",
+        version="1.0.0",
+        profile=strict_profile,
+        values_files=(),
+        set_values=(),
+        output=initial,
+        renderer=FakeRenderer(b"apiVersion: v1\nkind: ConfigMap\nmetadata: {name: example}\n"),
+    )
+    alternate = tmp_path / "alternate"
+    write_bundle(
+        alternate,
+        evaluation,
+        normalized_profile=strict_profile.model_dump(mode="json"),
+        redacted_manifest="---\n",
+        artifacts={"artifacts/kubernetes/pods.json": "[]\n"},
+    )
+    service = HistoryService.local(tmp_path / "history")
+    service.import_bundle(initial)
+
+    with pytest.raises(HistoryError, match="different content"):
+        service.import_bundle(alternate)

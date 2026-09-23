@@ -102,6 +102,26 @@ ADR directory is retained as historical design exploration.
 - Reversal criterion: remote operation, multiple writers or shared access justifies
   the PostgreSQL/OCI adapters and an authenticated service boundary.
 
+### D-007 — Indicative CPU samples in repeatability comparisons
+
+- Status: Accepted
+- Date: 2026-09-23
+- Requirement: test whether repeated runtime evaluations support stable outcomes
+  without treating low-load Metrics API CPU samples as exact measurements.
+- Decision: runtime check execution status and assessment must match. For
+  comparable complete Pod-group samples, the difference between sampled CPU
+  peaks may not exceed the larger of 25% of the larger peak and the smaller of
+  20 millicores or 1% of the profile's sampled-CPU limit. Without that profile
+  limit, numeric CPU repeatability is inconclusive. This comparison rule does
+  not alter the product's sampled-CPU constraint or suppress a blocker.
+- Why: a relative-only tolerance is overly sensitive near zero, while the
+  bounded absolute allowance keeps differences small relative to the declared
+  policy limit. The first relative-only comparison failed; two new pinned
+  product pairs passed after the revised rule was fixed in advance.
+- Reversal criterion: repeated independent pairs outside this range, or
+  evidence that the allowance hides materially different resource behavior,
+  requires a revised sampling experiment and a new predeclared criterion.
+
 ## Current default recommendations, not yet accepted
 
 | Decision | Default | Reversal signal |

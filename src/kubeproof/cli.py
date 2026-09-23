@@ -13,7 +13,8 @@ from kubeproof.domain import Severity
 from kubeproof.helm import HelmRenderError
 from kubeproof.history import HistoryError, HistoryService
 from kubeproof.manifests import ManifestError
-from kubeproof.profile import load_profile
+from kubeproof.profile import CompanyProfile, load_profile
+from kubeproof.reproducibility import compare_evaluations
 from kubeproof.service import inspect_chart
 from kubeproof.web import serve_history
 
@@ -133,6 +134,35 @@ def verify(
         raise typer.Exit(code=1) from exc
     status = "sealed" if result.bundle_sha256 is not None else "legacy, unsealed"
     typer.echo(f"Verified evaluation: {result.evaluation.evaluation_id} ({status})")
+
+
+@app.command()
+def compare(
+    first: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+    second: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+) -> None:
+    """Compare two sealed evaluations under the documented runtime tolerances."""
+    try:
+        first_bundle = verify_bundle(first)
+        second_bundle = verify_bundle(second)
+        if first_bundle.bundle_sha256 is None or second_bundle.bundle_sha256 is None:
+            raise ValueError("repeatability comparison requires sealed bundles")
+        profile = CompanyProfile.model_validate_json(
+            (first / "profile.normalized.json").read_bytes()
+        )
+        result = compare_evaluations(first_bundle.evaluation, second_bundle.evaluation, profile)
+    except (BundleError, OSError, ValidationError, ValueError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Repeatability: {result.status}")
+    for difference in result.differences:
+        typer.echo(f"difference: {difference}")
+    for limitation in result.limitations:
+        typer.echo(f"limitation: {limitation}")
+    if result.status == "different":
+        raise typer.Exit(code=2)
+    if result.status == "inconclusive":
+        raise typer.Exit(code=1)
 
 
 @history_app.command("sync")

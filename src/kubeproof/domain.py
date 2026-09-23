@@ -62,6 +62,7 @@ class ResourceRef(StrictModel):
 
 class ObservationProvenance(StrictModel):
     source_ref: str = Field(
+        min_length=1,
         description="Input or runtime environment from which this fact was collected."
     )
     source_sha256: str | None = Field(
@@ -132,6 +133,7 @@ class CheckResult(StrictModel):
     id: str = Field(description="Stable machine-readable identifier of the check.")
     experiment_version: str = Field(
         default="1",
+        min_length=1,
         description="Version of the deterministic check or experiment that produced this result.",
     )
     title: str = Field(description="Human-readable name of the check.")
@@ -249,6 +251,10 @@ class EnvironmentInfo(StrictModel):
     kubernetes_server_version: str | None = Field(
         default=None,
         description="Version reported by the disposable cluster Kubernetes API, when available.",
+    )
+    metrics_server_manifest_sha256: str | None = Field(
+        default=None,
+        description="SHA-256 digest of the pinned Metrics Server installation manifest.",
     )
 
 

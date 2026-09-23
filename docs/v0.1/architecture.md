@@ -4,8 +4,8 @@
 |---|---|
 | Status | **Accepted implementation architecture** |
 | Product thesis | AI investigates; the runtime proves |
-| Current implementation milestone | Milestone 1 — Proof completed; Milestone 2 pending |
-| Last updated | 2026-09-22 |
+| Current implementation milestone | Milestone 2 — Evidence completed; Milestone 3 pending |
+| Last updated | 2026-09-23 |
 
 ## 1. Objective
 
@@ -197,6 +197,14 @@ experiment versions, artifact hashes, provenance, offline bundle validation and
 strong source-class separation. Demonstrate tamper detection, deterministic
 reporting from evaluation state and reproducibility within documented runtime
 tolerances. Add SQLite only for a demonstrated local indexing/resume need.
+
+The implemented bundle contract and validation procedure are documented in
+[`evidence.md`](evidence.md). The local history feature already uses SQLite as a
+rebuildable query index, following accepted decision D-006.
+Two independent runtime pairs, cert-manager and Argo CD, met the documented
+repeatability criteria after the CPU tolerance was fixed before collection.
+The earlier relative-only CPU comparison failure remains recorded in the
+evidence log.
 
 ### Milestone 3 — Intelligence
 

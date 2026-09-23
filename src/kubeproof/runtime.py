@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -28,7 +29,11 @@ from kubeproof.domain import (
 )
 from kubeproof.environment import EnvironmentError, KindProvider, temporary_kubeconfig
 from kubeproof.helm import HelmInstaller, HelmRenderError, HelmRenderRequest
-from kubeproof.infrastructure import InfrastructureError, install_metrics_server
+from kubeproof.infrastructure import (
+    METRICS_SERVER_MANIFEST,
+    InfrastructureError,
+    install_metrics_server,
+)
 from kubeproof.kubernetes import (
     ClusterReader,
     KubernetesError,
@@ -541,6 +546,9 @@ def run_runtime(
             leftovers_before_cluster_deletion=leftovers,
             runtime_safety_rule_ids=monitor.matched_rule_ids if monitor else (),
             kubernetes_server_version=kubernetes_server_version,
+            metrics_server_manifest_sha256=hashlib.sha256(
+                METRICS_SERVER_MANIFEST.read_bytes()
+            ).hexdigest(),
         ),
         artifacts=artifacts,
     )
