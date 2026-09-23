@@ -1,0 +1,51 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Python checks and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: '0.11.21'
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev
+      - name: Lint
+        run: uv run --no-sync ruff check src/kubeproof tests
+      - name: Format
+        run: uv run --no-sync ruff format --check src/kubeproof tests
+      - name: Types
+        run: uv run --no-sync mypy src/kubeproof
+      - name: Tests
+        run: uv run --no-sync pytest -q
+
+  frontend:
+    name: React checks and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Typecheck and build
+        run: npm run build

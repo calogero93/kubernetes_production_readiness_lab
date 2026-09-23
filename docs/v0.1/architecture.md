@@ -54,23 +54,19 @@ flowchart LR
     Runner --> Cleanup[Uninstall and Cluster Cleanup]
 ```
 
-### 3.1 Modules
+### 3.1 Current source layout
 
-| Module | Responsibility |
+| Package | Responsibility |
 |---|---|
-| `cli` | Commands, options, progress and exit codes |
-| `profiles` | Validate the small versioned YAML company profile defined in [`profile.md`](profile.md) |
-| `inputs` | Resolve Helm repository/OCI input, version, values and metadata |
-| `preflight` | Render manifests, inventory resources and enforce local safety policy |
-| `environment` | Create, inspect and destroy one kind cluster |
-| `helm` | Typed render/install/status/uninstall operations |
-| `kubernetes` | Narrow API reads, watches and resource operations |
-| `checks` | Five explicit deterministic checks |
-| `collectors` | Events, statuses, logs, CoreDNS queries and Metrics API samples |
-| `model` | Typed specifications, observations, findings and outcomes |
-| `reporting` | Deterministic canonical JSON and Markdown rendering |
-| `bundle` | Run-directory layout and raw artifact writes |
-| `logging` | Correlated structured diagnostic logs |
+| `core` | Domain models, profile validation, manifest parsing, deterministic analysis and safety admission |
+| `execution` | Typed Helm/kind/Kubernetes adapters, runtime checks and tool fingerprinting |
+| `evidence` | Bundle sealing and validation, deterministic reporting, history index and repeatability comparison |
+| `application` | Inspection use case coordinating the other packages |
+| `interfaces` | Typer CLI and local JSON API/static frontend delivery |
+
+These are source-code boundaries, not separate services or an agent framework.
+The tests mirror the same responsibilities under `tests/`. The UI source is a
+separate React project in `frontend/` and consumes the local history API.
 
 ### 3.2 Execution flow
 

@@ -26,7 +26,7 @@ dev = [
 ]
 
 [project.scripts]
-kubeproof = "kubeproof.cli:app"
+kubeproof = "kubeproof.interfaces.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kubeproof"]

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from kubeproof.profile import CompanyProfile
+from kubeproof.core.profile import CompanyProfile
 
 
 @pytest.fixture

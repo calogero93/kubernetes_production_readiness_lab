@@ -41,16 +41,21 @@ Current design decisions and truth semantics live in [`docs/v0.1`](docs/v0.1).
 
 ## Local evaluation history
 
-Import a completed bundle into the local immutable store and SQLite index, then
-start the single-user history UI:
+Build the React frontend once, then import a completed bundle into the local
+immutable store and SQLite index and start the single-user history UI:
 
 ```bash
+cd frontend
+npm ci
+npm run build
+cd ..
 uv run kubeproof history import ./kubeproof-run --data-dir ./.kubeproof
 uv run kubeproof serve --data-dir ./.kubeproof
 ```
 
 Open `http://127.0.0.1:8000`. The history page shows each evaluation and drills
-down from checks to findings and their supporting observations. A new inspection
+down from checks to findings and their supporting observations. For live
+frontend development, see [frontend/README.md](frontend/README.md). A new inspection
 can be indexed immediately with `--history-dir`:
 
 ```bash
@@ -81,3 +86,10 @@ uv run kubeproof compare ./first-run ./second-run
 
 See the [evidence bundle contract](docs/v0.1/evidence.md) for provenance,
 integrity limits and runtime reproducibility criteria.
+The [Milestone 2 guide](docs/v0.1/milestone-2.md) compares the Evidence milestone
+with Milestone 1 and explains the verification workflow.
+
+Source modules are grouped into `core`, `execution`, `evidence`, `application`
+and `interfaces` under `src/kubeproof`; `tests/` mirrors those responsibilities.
+Every push and pull request runs Python lint, formatting, type checks and tests,
+plus the frontend test and typechecked build, in GitHub Actions.
