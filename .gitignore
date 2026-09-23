@@ -10,3 +10,4 @@ kubeproof-corpus-runs/
 frontend/node_modules/
 frontend/dist/
 docs/private/milestone-1-code-guide.md
+docs/private/milestone-2-code-guide.md
