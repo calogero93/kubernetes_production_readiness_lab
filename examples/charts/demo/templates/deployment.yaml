@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubeproof-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubeproof-demo
+    spec:
+      containers:
+        - name: demo
+          image: {{ .Values.image | quote }}
+          env:
+            - name: EXTERNAL_ENDPOINT
+              value: {{ .Values.externalEndpoint | quote }}
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

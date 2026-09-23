@@ -1,0 +1,4 @@
+# The default node exporter mounts host paths and is static-only under the
+# developer-owned kind admission policy. This separate configuration removes it.
+nodeExporter:
+  enabled: false

@@ -1,0 +1,30 @@
+schema_version: "0.1"
+name: enterprise-strict
+
+constraints:
+  security:
+    allow_cluster_admin: false
+    allow_wildcard_rbac: false
+    allow_privileged: false
+    allow_host_network: false
+    allow_host_pid: false
+    allow_host_path: false
+    require_run_as_non_root: true
+    require_read_only_root_filesystem: true
+    allowed_added_capabilities: []
+
+  resources:
+    require_requests: true
+    require_limits: true
+    max_memory_limit_per_pod: 2Gi
+    max_cpu_limit_per_pod: "2"
+    max_sampled_memory_per_pod: 2Gi
+    max_sampled_cpu_per_pod: "2"
+
+  reliability:
+    minimum_replicas: 2
+    max_pod_replacement_ready_seconds: 30
+
+  networking:
+    allow_public_egress: false
+    allowed_external_domains: []

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: kubeproof-demo
+description: Minimal local chart used to exercise the static vertical slice
+type: application
+version: 0.1.0
+appVersion: "1.0"
+

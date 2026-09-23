@@ -1,0 +1,4 @@
+# A fresh kind cluster has no cert-manager CRDs. The startup API check hook
+# needs them, so this run explicitly installs the chart's CRDs.
+crds:
+  enabled: true

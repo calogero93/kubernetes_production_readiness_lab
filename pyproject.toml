@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kubeproof"
+version = "0.1.0a0"
+description = "Evidence-driven qualification of Kubernetes products"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "KubeProof contributors" }]
+dependencies = [
+  "kubernetes>=30,<35",
+  "pydantic>=2.10,<3",
+  "PyYAML>=6.0,<7",
+  "typer>=0.15,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.14,<2",
+  "pytest>=8.3,<9",
+  "ruff>=0.9,<1",
+  "types-PyYAML>=6.0,<7",
+]
+
+[project.scripts]
+kubeproof = "kubeproof.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kubeproof"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["kubeproof"]
+
+[[tool.mypy.overrides]]
+module = ["kubernetes", "kubernetes.*"]
+ignore_missing_imports = true
