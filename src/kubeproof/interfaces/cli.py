@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -47,22 +48,24 @@ def ai_schema() -> None:
 
 @ai_app.command("doctor")
 def ai_doctor() -> None:
-    """Check a configured local llama.cpp server without running inference."""
+    """Check a configured llama.cpp or OpenAI-compatible server without inference."""
     try:
         from kubeproof.intelligence.model_config import (
             ModelConfigurationError,
             ModelProbeError,
+            probe_compatible_model,
             probe_llama_cpp,
         )
 
-        status = probe_llama_cpp()
+        provider = os.environ.get("KUBEPROOF_AI_PROVIDER", "").strip()
+        status = probe_llama_cpp() if provider == "llama_cpp" else probe_compatible_model()
     except ImportError as exc:
         typer.echo("error: install the AI extra with 'uv sync --extra ai'", err=True)
         raise typer.Exit(code=1) from exc
     except (ModelConfigurationError, ModelProbeError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo(f"Local model ready: {status.model_id} at {status.base_url}")
+    typer.echo(f"Model available: {status.model_id} at {status.base_url}")
 
 
 @ai_app.command("draft")
@@ -122,6 +125,37 @@ def ai_plan(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(plan.model_dump_json(indent=2))
+
+
+@app.command("probe-service")
+def probe_service(
+    service: Annotated[str, typer.Argument(help="Service name in the target namespace.")],
+    namespace: Annotated[str, typer.Option("--namespace")],
+    image: Annotated[str, typer.Option("--image", help="Pullable KubeProof image for the Job.")],
+    port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 80,
+    path: Annotated[str, typer.Option("--path")] = "/healthz",
+    requests: Annotated[int, typer.Option("--requests", min=1, max=50)] = 10,
+    context: Annotated[str | None, typer.Option("--context")] = None,
+) -> None:
+    """Send bounded HTTP traffic through a Service from inside Kubernetes."""
+    from kubeproof.execution.service_probe import ServiceProbeError, run_service_probe
+
+    try:
+        result = run_service_probe(
+            service=service,
+            namespace=namespace,
+            port=port,
+            path=path,
+            requests=requests,
+            image=image,
+            context=context,
+        )
+    except (ValueError, ServiceProbeError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(result, indent=2, sort_keys=True))
+    if not result["passed"]:
+        raise typer.Exit(code=2)
 
 
 @app.command()

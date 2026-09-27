@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from typing import Protocol
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
 
 from kubeproof.intelligence.capabilities import CapabilityCatalog
 from kubeproof.intelligence.models import ConfirmedRequest, RequestDraft, TestPlan, TrialRecord
+from kubeproof.observability import MODEL_CALLS, MODEL_DURATION
 
 
 class InvalidModelPlan(ValueError):
@@ -29,6 +33,34 @@ class Supervisor(Protocol):
         records: tuple[TrialRecord, ...],
         catalog: CapabilityCatalog,
     ) -> TestPlan: ...
+
+
+def _invoke(
+    model: BaseChatModel, messages: list[SystemMessage | HumanMessage], operation: str
+) -> BaseMessage:
+    """Observe one model call; Langfuse is explicit opt-in because it receives prompts."""
+    keys = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL")
+    configured = [bool(os.environ.get(key)) for key in keys]
+    if any(configured) and not all(configured):
+        raise ValueError("Langfuse requires public key, secret key, and base URL")
+    config: RunnableConfig | None = None
+    if all(configured):
+        try:
+            from langfuse.langchain import CallbackHandler
+        except ImportError as exc:
+            raise ValueError("install the tracing extra to enable Langfuse") from exc
+        config = {"callbacks": [CallbackHandler()]}
+    started = time.perf_counter()
+    try:
+        response = model.invoke(messages, config=config)
+    except Exception:
+        MODEL_CALLS.labels(operation, "error").inc()
+        raise
+    else:
+        MODEL_CALLS.labels(operation, "response").inc()
+        return response
+    finally:
+        MODEL_DURATION.labels(operation).observe(time.perf_counter() - started)
 
 
 class LangChainSupervisor:
@@ -52,7 +84,8 @@ class LangChainSupervisor:
             "plan_schema": TestPlan.model_json_schema(),
             "available_capabilities": catalog.planning_context(),
         }
-        message = self._model.invoke(
+        message = _invoke(
+            self._model,
             [
                 SystemMessage(
                     content=(
@@ -66,7 +99,8 @@ class LangChainSupervisor:
                     )
                 ),
                 HumanMessage(content=json.dumps(context, sort_keys=True)),
-            ]
+            ],
+            "plan",
         )
         if not isinstance(message.content, str):
             raise InvalidModelPlan("model response was not plain JSON text")
@@ -85,7 +119,8 @@ class LangChainRequirementsExtractor:
     def extract(self, description: str) -> RequestDraft:
         if not description.strip():
             raise ValueError("evaluation description cannot be empty")
-        message = self._model.invoke(
+        message = _invoke(
+            self._model,
             [
                 SystemMessage(
                     content=(
@@ -107,7 +142,8 @@ class LangChainRequirementsExtractor:
                         sort_keys=True,
                     )
                 ),
-            ]
+            ],
+            "draft",
         )
         if not isinstance(message.content, str):
             raise InvalidRequirementDraft("model response was not plain JSON text")

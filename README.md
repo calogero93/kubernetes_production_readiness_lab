@@ -118,4 +118,40 @@ approval. The single plan can contain different registered capabilities, but
 only CPU load is executable today. These measurements are specific to a
 fixture Pod, not a general product-capacity or autoscaling claim.
 For local llama.cpp, see the [server setup and verification steps](docs/v0.1/milestone-3-ai-design.md#local-llamacpp-path);
-`kubeproof ai doctor` checks the configured server and model ID without inference.
+`kubeproof ai doctor` checks the configured llama.cpp or OpenAI-compatible
+server and model ID without inference.
+
+## Kubernetes deployment and Service probe
+
+The [Kubernetes deployment guide](docs/production-deployment.md) covers the
+container, Helm chart, local kind test, GHCR publish and manual digest-pinned
+deployment to an arbitrary cluster. The deployed UI is currently a private,
+single-operator history service. It exposes Prometheus metrics, supports an
+optional Prometheus Operator ServiceMonitor and an importable Grafana dashboard.
+Optional Langfuse callbacks trace AI model calls; the same OpenAI-compatible
+adapter connects to a TLS-protected vLLM endpoint. The CLI's `probe-service`
+command runs bounded HTTP traffic *from a Job inside Kubernetes* through a
+selected Service and reports observed status counts and p95 latency.
+
+## Roadmap
+
+- [x] Package the history service as a non-root container and portable Helm
+  chart; verify a local kind rollout and Service endpoints.
+- [x] Run Python, frontend, Helm and image checks in CI; publish GHCR images
+  with provenance on tags and deploy a reviewed digest manually.
+- [x] Expose low-cardinality Prometheus metrics, Grafana dashboard and opt-in
+  Langfuse model traces; add model discovery for OpenAI-compatible/vLLM servers.
+- [x] Add a bounded, in-cluster HTTP Service probe with measured status and p95.
+- [ ] Integrate the Service probe into sealed evidence bundles with cluster,
+  image digest, endpoint and time provenance, plus explicit acceptance criteria.
+- [ ] Replace Docker/kind coupling for live evaluations with a namespace-scoped
+  Kubernetes runner, dedicated RBAC, durable queue and recovery after Pod restart.
+- [ ] Add an HPA experiment: generate bounded load, observe metrics, desired and
+  ready replicas over time, then verify scale-up, scale-down and latency limits.
+- [ ] Add CNI/NetworkPolicy and service-mesh cases: use isolated source and
+  destination Pods to test declared allow/deny paths, mTLS and routing behavior;
+  report unsupported enforcement distinctly from a product failure.
+- [ ] Add model plan-quality evaluations against a versioned dataset for local,
+  on-prem and vLLM endpoints; track schema compliance and unsafe proposals.
+- [ ] Add authenticated multi-user access, external durable storage and a
+  production run queue before exposing the UI beyond trusted operators.

@@ -1,0 +1,40 @@
+image:
+  repository: ghcr.io/replace-me/kubeproof
+  tag: "0.1.0a0"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+service:
+  port: 80
+
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClassName: ""
+
+model:
+  provider: ""
+  name: ""
+  baseUrl: ""
+  existingSecret: ""
+  apiKeyKey: KUBEPROOF_AI_API_KEY
+
+langfuse:
+  enabled: false
+  baseUrl: ""
+  existingSecret: ""
+  publicKeyKey: LANGFUSE_PUBLIC_KEY
+  secretKeyKey: LANGFUSE_SECRET_KEY
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+    labels: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

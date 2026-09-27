@@ -47,6 +47,16 @@ def test_history_api_and_built_frontend_are_served_separately(tmp_path: Path) ->
     assert status == HTTPStatus.OK
     assert json.loads(body) == []
 
+    for path in ("/healthz", "/readyz"):
+        status, _, body = _get(service, frontend, path)
+        assert status == HTTPStatus.OK
+        assert body == b"ok\n"
+
+    status, headers, body = _get(service, frontend, "/metrics")
+    assert status == HTTPStatus.OK
+    assert b"text/plain" in headers
+    assert b'kubeproof_http_requests_total{method="GET",route="/healthz",status="200"}' in body
+
     status, _, _ = _get(service, frontend, "/assets/%2e%2e/%2e%2e/secret")
     assert status == HTTPStatus.NOT_FOUND
 

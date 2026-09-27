@@ -19,6 +19,7 @@ from kubeproof.intelligence.model_config import (
     ModelConfigurationError,
     ModelProbeError,
     create_chat_model,
+    probe_compatible_model,
     probe_llama_cpp,
 )
 from kubeproof.intelligence.models import RequestDraft, TestPlan
@@ -113,6 +114,31 @@ def test_plain_http_remote_endpoint_and_missing_remote_key_are_rejected() -> Non
         create_chat_model(settings)
 
 
+def test_vllm_compatible_probe_uses_exact_model_id_and_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[str, str]] = []
+
+    def read(url: str, key: str) -> object:
+        observed.append((url, key))
+        return {"data": [{"id": "other"}, {"id": "chosen-model"}]}
+
+    monkeypatch.setattr("kubeproof.intelligence.model_config._read_local_json", read)
+    settings = {
+        "KUBEPROOF_AI_PROVIDER": "openai_compatible",
+        "KUBEPROOF_AI_MODEL": "chosen-model",
+        "KUBEPROOF_AI_BASE_URL": "https://vllm.example.internal/v1",
+        "KUBEPROOF_AI_API_KEY": "test-key",
+    }
+    status = probe_compatible_model(settings)
+    assert status.model_id == "chosen-model"
+    assert observed == [("https://vllm.example.internal/v1/models", "test-key")]
+    with pytest.raises(ModelConfigurationError, match="API_KEY"):
+        probe_compatible_model(
+            {key: value for key, value in settings.items() if key != "KUBEPROOF_AI_API_KEY"}
+        )
+
+
 def test_api_key_is_selected_from_environment_without_a_pinned_model() -> None:
     model = create_chat_model(
         {
@@ -154,6 +180,27 @@ def test_supervisor_accepts_only_typed_json_plan() -> None:
     assert supervisor.propose(request(), None, (), cpu_capabilities()) == plan
     with pytest.raises(InvalidModelPlan):
         supervisor.propose(request(), None, (), cpu_capabilities())
+
+
+def test_langfuse_is_explicit_and_attached_only_with_complete_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = TestPlan(version=1, tasks=(task("cpu-50", 50),))
+    model = FakeListChatModel(responses=[])
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "public")
+    with pytest.raises(ValueError, match="requires public key"):
+        LangChainSupervisor(model).propose(request(), None, (), cpu_capabilities())
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://langfuse.example")
+    callback = object()
+    with (
+        patch("langfuse.langchain.CallbackHandler", return_value=callback),
+        patch.object(
+            FakeListChatModel, "invoke", return_value=AIMessage(content=plan.model_dump_json())
+        ) as call,
+    ):
+        LangChainSupervisor(model).propose(request(), None, (), cpu_capabilities())
+    assert call.call_args.kwargs["config"] == {"callbacks": [callback]}
 
 
 def test_supervisor_prompt_is_general_and_capabilities_are_run_context() -> None:

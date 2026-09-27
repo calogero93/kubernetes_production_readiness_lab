@@ -25,6 +25,7 @@ from kubeproof.execution.cpu_fixture import validate_fixture_resources
 from kubeproof.execution.cpu_live import CpuLiveExperiment
 from kubeproof.execution.helm import HelmRenderRequest
 from kubeproof.intelligence.models import ConfirmedRequest
+from kubeproof.observability import LIVE_RUNS
 
 MAX_CHART_BYTES = 10 * 1024 * 1024
 
@@ -242,9 +243,11 @@ class LiveJobManager:
             with self._lock:
                 job.status = "error"
                 job.error = str(exc)
+            LIVE_RUNS.labels("error").inc()
         else:
             with self._lock:
                 job.status = "completed"
                 job.evaluation_id = evaluation.evaluation_id
+            LIVE_RUNS.labels("completed").inc()
         finally:
             job.directory.cleanup()

@@ -26,7 +26,7 @@ class ModelProbeError(ValueError):
 
 @dataclass(frozen=True)
 class LocalModelStatus:
-    """The configured model ID was found on a ready local server."""
+    """The configured model ID was found on the selected server."""
 
     base_url: str
     model_id: str
@@ -74,16 +74,16 @@ def _read_local_json(url: str, api_key: str) -> object:
             body = response.read(1_000_001)
     except HTTPError as exc:
         if exc.code == 503:
-            raise ModelProbeError("local model server is still loading") from exc
-        raise ModelProbeError(f"local model server returned HTTP {exc.code}") from exc
+            raise ModelProbeError("model server is still loading") from exc
+        raise ModelProbeError(f"model server returned HTTP {exc.code}") from exc
     except (OSError, URLError) as exc:
-        raise ModelProbeError("cannot connect to the local model server") from exc
+        raise ModelProbeError("cannot connect to the model server") from exc
     if len(body) > 1_000_000:
-        raise ModelProbeError("local model server response is too large")
+        raise ModelProbeError("model server response is too large")
     try:
         return json.loads(body)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ModelProbeError("local model server returned invalid JSON") from exc
+        raise ModelProbeError("model server returned invalid JSON") from exc
 
 
 def probe_llama_cpp(env: Mapping[str, str] | None = None) -> LocalModelStatus:
@@ -105,6 +105,27 @@ def probe_llama_cpp(env: Mapping[str, str] | None = None) -> LocalModelStatus:
     if not any(isinstance(item, dict) and item.get("id") == model_id for item in models["data"]):
         raise ModelProbeError("configured model ID is not exposed by the local server")
     return LocalModelStatus(base_url=endpoint, model_id=model_id)
+
+
+def probe_compatible_model(env: Mapping[str, str] | None = None) -> LocalModelStatus:
+    """Check a selected OpenAI-compatible model, including vLLM, without inference."""
+    settings = os.environ if env is None else env
+    if settings.get("KUBEPROOF_AI_PROVIDER", "").strip() != "openai_compatible":
+        raise ModelConfigurationError("compatible probe requires openai_compatible provider")
+    model = settings.get("KUBEPROOF_AI_MODEL", "").strip()
+    base_url = settings.get("KUBEPROOF_AI_BASE_URL", "").strip()
+    if not model or not base_url:
+        raise ModelConfigurationError("model ID and base URL are required")
+    endpoint = _configured_base_url(base_url)
+    key = settings.get("KUBEPROOF_AI_API_KEY", "").strip()
+    if urlsplit(endpoint).hostname not in {"localhost", "127.0.0.1", "::1"} and not key:
+        raise ModelConfigurationError("remote compatible endpoints require KUBEPROOF_AI_API_KEY")
+    models = _read_local_json(f"{endpoint}/models", key)
+    if not isinstance(models, dict) or not isinstance(models.get("data"), list):
+        raise ModelProbeError("compatible model server returned an invalid model list")
+    if not any(isinstance(item, dict) and item.get("id") == model for item in models["data"]):
+        raise ModelProbeError("configured model ID is not exposed by the server")
+    return LocalModelStatus(base_url=endpoint, model_id=model)
 
 
 def create_chat_model(env: Mapping[str, str] | None = None) -> BaseChatModel:

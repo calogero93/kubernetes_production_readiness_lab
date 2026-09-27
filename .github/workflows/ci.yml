@@ -2,7 +2,9 @@ name: Verify
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -20,7 +22,7 @@ jobs:
         with:
           version: '0.11.21'
       - name: Install locked dependencies
-        run: uv sync --frozen --extra ai --extra dev
+        run: uv sync --frozen --extra ai --extra tracing --extra dev
       - name: Lint
         run: uv run --no-sync ruff check src/kubeproof tests
       - name: Format
@@ -49,3 +51,15 @@ jobs:
         run: npm test
       - name: Typecheck and build
         run: npm run build
+
+  packaging:
+    name: Helm and container packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.21.1
+      - run: helm lint deploy/charts/kubeproof
+      - run: helm template kubeproof deploy/charts/kubeproof --namespace kubeproof-system > /dev/null
+      - run: docker build -t kubeproof:ci .

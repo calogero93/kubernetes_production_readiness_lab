@@ -1,0 +1,43 @@
+{
+  "title": "KubeProof application",
+  "uid": "kubeproof-app",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["kubeproof"],
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP requests per second",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (route, status) (rate(kubeproof_http_requests_total{route!~\"/healthz|/readyz|/metrics\"}[5m]))", "legendFormat": "{{route}} {{status}}", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "title": "HTTP p95 latency",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, route) (rate(kubeproof_http_request_duration_seconds_bucket{route!~\"/healthz|/readyz|/metrics\"}[5m])))", "legendFormat": "{{route}}", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "title": "Model calls",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (operation, outcome) (increase(kubeproof_model_calls_total[5m]))", "legendFormat": "{{operation}} {{outcome}}", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "title": "Local live run outcomes",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"expr": "sum by (outcome) (increase(kubeproof_live_runs_total[1h]))", "legendFormat": "{{outcome}}", "refId": "A"}]
+    }
+  ],
+  "__inputs": [{"name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus", "pluginName": "Prometheus"}]
+}

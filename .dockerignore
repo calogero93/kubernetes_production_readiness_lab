@@ -1,0 +1,10 @@
+.git
+.venv
+.kubeproof
+**/__pycache__
+**/.pytest_cache
+frontend/node_modules
+frontend/dist
+docs/experiments
+examples/corpus
+tests

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import time
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 from kubeproof.evidence.history import HistoryError, HistoryService
+from kubeproof.observability import HTTP_DURATION, HTTP_REQUESTS, metrics_response, route_name
 
 if TYPE_CHECKING:
     from kubeproof.interfaces.live_jobs import LiveJobManager
@@ -53,6 +55,13 @@ def make_handler(
             return body
 
         def _respond(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
+            path = urlparse(self.path).path
+            method = getattr(self, "command", "GET")
+            route = route_name(method, path)
+            HTTP_REQUESTS.labels(route, method, str(status.value)).inc()
+            HTTP_DURATION.labels(route, method).observe(
+                max(0.0, time.perf_counter() - getattr(self, "_started_at", time.perf_counter()))
+            )
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
@@ -94,8 +103,16 @@ def make_handler(
             self._respond(HTTPStatus.OK, body, content_type)
 
         def do_GET(self) -> None:
+            self._started_at = time.perf_counter()
             path = urlparse(self.path).path
             try:
+                if path == "/metrics":
+                    body, content_type = metrics_response()
+                    self._respond(HTTPStatus.OK, body, content_type)
+                    return
+                if path in {"/healthz", "/readyz"}:
+                    self._respond(HTTPStatus.OK, b"ok\n", "text/plain; charset=utf-8")
+                    return
                 if path == "/api/live/config":
                     self._respond(
                         HTTPStatus.OK,
@@ -149,6 +166,7 @@ def make_handler(
                 self._error(HTTPStatus.CONFLICT, str(exc))
 
         def do_POST(self) -> None:
+            self._started_at = time.perf_counter()
             path = urlparse(self.path).path
             if path == "/api/live/preflight" or (
                 path.startswith("/api/live/runs/") and path.endswith("/approve")

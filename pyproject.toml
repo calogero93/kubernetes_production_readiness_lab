@@ -14,6 +14,7 @@ dependencies = [
   "kubernetes>=30,<35",
   "pydantic>=2.10,<3",
   "PyYAML>=6.0,<7",
+  "prometheus-client>=0.22,<1",
   "typer>=0.15,<1",
 ]
 
@@ -23,6 +24,7 @@ ai = [
   "langchain-openai>=1,<2",
   "langgraph>=1.2,<2",
 ]
+tracing = ["langfuse>=3,<4"]
 dev = [
   "mypy>=1.14,<2",
   "pytest>=8.3,<9",

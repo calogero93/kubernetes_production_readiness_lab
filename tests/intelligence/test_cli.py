@@ -22,6 +22,7 @@ def test_schema_is_available_without_model_configuration() -> None:
 def test_doctor_reports_local_model_without_running_inference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("KUBEPROOF_AI_PROVIDER", "llama_cpp")
     monkeypatch.setattr(
         "kubeproof.intelligence.model_config.probe_llama_cpp",
         lambda: LocalModelStatus("http://127.0.0.1:8080/v1", "selected-gguf"),
@@ -32,6 +33,8 @@ def test_doctor_reports_local_model_without_running_inference(
 
 
 def test_doctor_fails_when_local_server_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KUBEPROOF_AI_PROVIDER", "llama_cpp")
+
     def unavailable() -> None:
         raise ModelProbeError("cannot connect to the local model server")
 
