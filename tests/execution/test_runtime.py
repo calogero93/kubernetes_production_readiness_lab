@@ -6,17 +6,18 @@ from typing import Any
 
 import pytest
 
-from kubeproof.core.domain import Assessment, ExecutionStatus, Observation, SourceClass
+from kubeproof.core.domain import Assessment, CheckResult, ExecutionStatus, Observation, SourceClass
 from kubeproof.core.profile import CompanyProfile
 from kubeproof.execution.environment import EnvironmentError
 from kubeproof.execution.helm import HelmRenderError, HelmRenderRequest
 from kubeproof.execution.kubernetes import KubernetesError
 from kubeproof.execution.runtime import (
+    ExperimentEvidence,
     _measure_resources,
-    _MetricsSnapshot,
     _observe_dns,
     run_runtime,
 )
+from kubeproof.execution.runtime_monitor import MetricsSnapshot
 
 
 class FakeKind:
@@ -168,6 +169,64 @@ def test_image_pull_failure_remains_infrastructure_uncertainty(
     assert not result.findings
 
 
+def test_experiment_runs_only_after_installation_is_ready(
+    strict_profile: CompanyProfile, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeExperiment:
+        check_id = "runtime.cpu_load"
+        title = "CPU load"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def prepare(self, cluster_name: str, kubeconfig: Path) -> None:
+            pass
+
+        def run(
+            self, cluster: Any, kubeconfig: Path, namespace: str, cancel_if: Any
+        ) -> ExperimentEvidence:
+            self.calls += 1
+            return ExperimentEvidence(
+                (
+                    CheckResult(
+                        id=self.check_id,
+                        title=self.title,
+                        execution_status=ExecutionStatus.COMPLETED,
+                        assessment=Assessment.PASS,
+                    ),
+                ),
+                (),
+                (),
+                {"artifacts/cpu/trial.json": "{}\n"},
+            )
+
+    monkeypatch.setattr("kubeproof.execution.runtime.install_metrics_server", lambda *_: None)
+    monkeypatch.setattr(
+        "kubeproof.execution.runtime.wait_for_workloads", lambda *_args, **_kwargs: (True, [])
+    )
+    resources = ({"kind": "Deployment", "metadata": {"name": "app"}},)
+    experiment = FakeExperiment()
+    options = dict(
+        request=HelmRenderRequest(chart="chart.tgz"),
+        resources=resources,
+        profile=strict_profile,
+        install_timeout_seconds=30,
+        steady_state_seconds=0,
+        max_recovery_targets=0,
+        provider=FakeKind(),
+        cluster_factory=lambda _: FakeCluster(),
+        experiment=experiment,
+    )
+    ready = run_runtime(**options, installer=FakeHelm())  # type: ignore[arg-type]
+    assert experiment.calls == 1
+    assert ready.checks[-1].assessment is Assessment.PASS
+    assert ready.artifacts["artifacts/cpu/trial.json"] == "{}\n"
+
+    failed = run_runtime(**options, installer=FakeHelm(fail_install=True))  # type: ignore[arg-type]
+    assert experiment.calls == 1
+    assert failed.checks[-1].assessment is Assessment.NOT_TESTED
+
+
 def test_dynamically_created_unsafe_pod_cancels_install_and_cleans_up(
     strict_profile: CompanyProfile, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -305,7 +364,7 @@ def test_memory_threshold_uses_complete_pod_sample(
     checks: dict[str, Any] = {}
     findings: list[Any] = []
     _measure_resources(
-        [_MetricsSnapshot(10, [pod], [metrics])],
+        [MetricsSnapshot(10, [pod], [metrics])],
         "product",
         profile,
         0,

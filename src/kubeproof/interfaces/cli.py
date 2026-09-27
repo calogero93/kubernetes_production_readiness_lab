@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -24,12 +25,103 @@ app = typer.Typer(
     help="Qualify Kubernetes products using attributable evidence.",
 )
 history_app = typer.Typer(help="Import, rebuild and inspect the local evaluation history.")
+ai_app = typer.Typer(
+    help="Preview AI requirement extraction and CPU test plans; never execute tests."
+)
 app.add_typer(history_app, name="history")
+app.add_typer(ai_app, name="ai")
 
 
 @app.callback()
 def main() -> None:
     """KubeProof command group."""
+
+
+@ai_app.command("schema")
+def ai_schema() -> None:
+    """Print the confirmed CPU evaluation request schema."""
+    from kubeproof.intelligence.models import ConfirmedRequest
+
+    typer.echo(json.dumps(ConfirmedRequest.model_json_schema(), indent=2))
+
+
+@ai_app.command("doctor")
+def ai_doctor() -> None:
+    """Check a configured local llama.cpp server without running inference."""
+    try:
+        from kubeproof.intelligence.model_config import (
+            ModelConfigurationError,
+            ModelProbeError,
+            probe_llama_cpp,
+        )
+
+        status = probe_llama_cpp()
+    except ImportError as exc:
+        typer.echo("error: install the AI extra with 'uv sync --extra ai'", err=True)
+        raise typer.Exit(code=1) from exc
+    except (ModelConfigurationError, ModelProbeError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Local model ready: {status.model_id} at {status.base_url}")
+
+
+@ai_app.command("draft")
+def ai_draft(
+    description: Annotated[str, typer.Argument(help="Natural-language evaluation request.")],
+) -> None:
+    """Extract a reviewable draft; it is never an executable policy."""
+    try:
+        from kubeproof.intelligence.model_adapter import (
+            InvalidRequirementDraft,
+            LangChainRequirementsExtractor,
+        )
+        from kubeproof.intelligence.model_config import ModelConfigurationError, create_chat_model
+
+        result = LangChainRequirementsExtractor(create_chat_model()).extract(description)
+    except ImportError as exc:
+        typer.echo("error: install the AI extra with 'uv sync --extra ai'", err=True)
+        raise typer.Exit(code=1) from exc
+    except (InvalidRequirementDraft, ModelConfigurationError, ValueError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@ai_app.command("plan")
+def ai_plan(
+    request_path: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True, help="Confirmed request JSON."),
+    ],
+) -> None:
+    """Generate and validate a CPU test plan without running any test."""
+    try:
+        from kubeproof.intelligence.capabilities import cpu_capabilities
+        from kubeproof.intelligence.control import PlanRejected, validate_plan
+        from kubeproof.intelligence.model_adapter import (
+            InvalidModelPlan,
+            LangChainSupervisor,
+        )
+        from kubeproof.intelligence.model_config import ModelConfigurationError, create_chat_model
+        from kubeproof.intelligence.models import ConfirmedRequest
+
+        request = ConfirmedRequest.model_validate_json(request_path.read_bytes())
+        catalog = cpu_capabilities()
+        plan = LangChainSupervisor(create_chat_model()).propose(request, None, (), catalog)
+        validate_plan(request, plan, catalog=catalog)
+    except ImportError as exc:
+        typer.echo("error: install the AI extra with 'uv sync --extra ai'", err=True)
+        raise typer.Exit(code=1) from exc
+    except (
+        OSError,
+        ValidationError,
+        InvalidModelPlan,
+        ModelConfigurationError,
+        PlanRejected,
+    ) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(plan.model_dump_json(indent=2))
 
 
 @app.command()

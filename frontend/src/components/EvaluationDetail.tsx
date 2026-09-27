@@ -25,6 +25,9 @@ function FindingCard({ finding }: { finding: Finding }) {
 }
 
 function ObservationCard({ observation }: { observation: Observation }) {
+  const measurement = observation.observation_type === 'cpu.bounded_load_trial' && observation.data.measurement && typeof observation.data.measurement === 'object'
+    ? observation.data.measurement as Record<string, unknown>
+    : null
   return (
     <article className="observation-card">
       <div className="observation-card__heading">
@@ -33,6 +36,9 @@ function ObservationCard({ observation }: { observation: Observation }) {
       </div>
       <strong>{resourceLabel(observation.resource)}</strong>
       <p>{observation.summary}</p>
+      {measurement && (
+        <p className="secondary">CPU trial: {String(measurement.achieved_rps ?? '—')} successful req/s · p95 {String(measurement.p95_ms ?? '—')} ms · peak {String(measurement.cpu_millicores ?? '—')} mCPU · goal {observation.data.meets_goal === true ? 'met' : 'not met'}</p>
+      )}
       {observation.provenance && (
         <p className="secondary mono">Source: {observation.provenance.source_ref}</p>
       )}

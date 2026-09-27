@@ -89,7 +89,33 @@ integrity limits and runtime reproducibility criteria.
 The [Milestone 2 guide](docs/v0.1/milestone-2.md) compares the Evidence milestone
 with Milestone 1 and explains the verification workflow.
 
-Source modules are grouped into `core`, `execution`, `evidence`, `application`
-and `interfaces` under `src/kubeproof`; `tests/` mirrors those responsibilities.
+Source modules are grouped into `core`, `execution`, `evidence`, `application`,
+`intelligence` and `interfaces` under `src/kubeproof`; `tests/` mirrors those
+responsibilities.
 Every push and pull request runs Python lint, formatting, type checks and tests,
 plus the frontend test and typechecked build, in GitHub Actions.
+
+## Controlled CPU benchmark
+
+The [CPU HTTP fixture](src/kubeproof/benchmarks/cpu_http/README.md) provides a
+bounded local service and fixed-rate load driver. Its Helm chart is under
+`examples/charts/cpu-fixture`. The UI can now package and upload this chart,
+confirm requirements, and—after explicit approval—run real load against one
+selected Pod in a disposable kind cluster. See the [live CPU UI walkthrough](docs/experiments/live-cpu-ui.md)
+for setup, the safety boundary, and how to interpret results. The
+[code map](docs/experiments/code-map.md) shows where each step lives and where
+to start debugging it.
+
+## AI planning
+
+The [Milestone 3 design](docs/v0.1/milestone-3-ai-design.md) describes the
+provider-neutral supervisor and deterministic execution boundary. Install the
+optional dependencies with `uv sync --extra ai --extra dev`. The CLI commands
+`ai schema`, `ai draft` and `ai plan` remain non-executing. In the local UI,
+the default is a deterministic single CPU pilot; selecting the AI supervisor
+uses the configured model to plan bounded CPU trials after confirmation and
+approval. The single plan can contain different registered capabilities, but
+only CPU load is executable today. These measurements are specific to a
+fixture Pod, not a general product-capacity or autoscaling claim.
+For local llama.cpp, see the [server setup and verification steps](docs/v0.1/milestone-3-ai-design.md#local-llamacpp-path);
+`kubeproof ai doctor` checks the configured server and model ID without inference.

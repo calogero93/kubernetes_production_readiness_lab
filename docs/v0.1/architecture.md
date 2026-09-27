@@ -204,11 +204,17 @@ evidence log.
 
 ### Milestone 3 — Intelligence
 
-Add one bounded Reasoner that can request only registered typed experiments.
-Deterministic code validates requests, executes actions and stores evidence. An
-eval corpus must show grounded improvement over the non-AI baseline, zero
-unauthorized execution, bounded cost/iterations and valid evidence references.
-Multiple agents require separate measurable justification.
+The accepted direction is now a supervisor that owns one versioned,
+heterogeneous test plan,
+specialized workers that execute admitted tests, and a deterministic coordinator
+for dependencies, concurrency, budgets and approvals. LangGraph will orchestrate
+the workflow with LangChain model/tool components. The first scenario is bounded
+CPU-load evaluation. The detailed contracts and unresolved implementation choices
+are in the [Milestone 3 AI design](milestone-3-ai-design.md); no AI
+execution is implied by this architecture decision or the current planning
+preview. An eval corpus must
+show grounded improvement over the non-AI baseline, zero unauthorized
+execution, bounded cost/iterations and valid evidence references.
 
 ### Milestone 4 — Product
 

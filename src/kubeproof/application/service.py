@@ -28,7 +28,7 @@ from kubeproof.core.safety import decide_local_admission
 from kubeproof.evidence.bundle import canonical_json_bytes, write_bundle
 from kubeproof.execution.fingerprint import capture_tool_fingerprint
 from kubeproof.execution.helm import HelmRenderer, HelmRenderRequest, HelmRenderResult
-from kubeproof.execution.runtime import run_runtime
+from kubeproof.execution.runtime import RuntimeExperiment, run_runtime
 
 
 class ManifestRenderer(Protocol):
@@ -102,7 +102,10 @@ def inspect_chart(
     install_timeout_seconds: int = 300,
     steady_state_seconds: int = 60,
     max_recovery_targets: int = 5,
+    experiment: RuntimeExperiment | None = None,
 ) -> EvaluationResult:
+    if experiment is not None and not execute_known_chart:
+        raise ValueError("runtime experiments require execute_known_chart=True")
     if execute_known_chart and (not Path(chart).is_file() or Path(chart).suffix != ".tgz"):
         raise ValueError("runtime execution requires a local pinned .tgz chart archive")
     if Path(chart).is_file() and Path(chart).stat().st_size > 100 * 1024 * 1024:
@@ -120,6 +123,8 @@ def inspect_chart(
     )
     render = helm.render(request)
     resources = parse_manifests(render.manifest)
+    if experiment is not None:
+        experiment.validate_resources(resources, request)
     analysis = analyze(resources, profile)
     admission = decide_local_admission(analysis.observations)
     runtime = (
@@ -130,6 +135,7 @@ def inspect_chart(
             install_timeout_seconds=install_timeout_seconds,
             steady_state_seconds=steady_state_seconds,
             max_recovery_targets=max_recovery_targets,
+            experiment=experiment,
         )
         if execute_known_chart and admission.outcome is AdmissionOutcome.ADMIT
         else None

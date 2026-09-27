@@ -122,18 +122,42 @@ ADR directory is retained as historical design exploration.
   evidence that the allowance hides materially different resource behavior,
   requires a revised sampling experiment and a new predeclared criterion.
 
+### D-008 — Milestone 3 supervisor/worker topology and framework
+
+- Status: Accepted design direction; implementation parameters remain open.
+- Date: 2026-09-25.
+- Requirement: plan bounded, potentially parallel experiments from confirmed
+  constraints while keeping execution, safety and evidence semantics auditable.
+- Decision: use an AI supervisor as the sole owner of one versioned,
+  heterogeneous plan for the overall objective,
+  specialized workers sharing operational state, and a deterministic coordinator
+  for task readiness, dependencies, retries and admission. Use LangGraph for
+  orchestration and LangChain for model/tool components. The first scenario is
+  bounded CPU-load evaluation.
+- Boundary: framework state is not authority to execute a tool. Company policy,
+  execution safety, approval, credentials and evidence validation remain
+  deterministic KubeProof responsibilities. Existing evidence bundles remain
+  authoritative; a recipe catalog is separate from run state.
+- Trade-off: graph/state contracts add implementation work, but the chosen
+  topology needs resumable human approvals and controlled parallel work.
+- Design details and open decisions: see
+  [`milestone-3-ai-design.md`](milestone-3-ai-design.md).
+- Reversal criterion: controlled prototype/eval evidence shows the framework
+  adds more complexity than it removes, or worker specialization fails to
+  improve coverage or clarity over a simpler single-agent baseline.
+
 ## Current default recommendations, not yet accepted
 
 | Decision | Default | Reversal signal |
 |---|---|---|
 | Persistence | Filesystem bundles + rebuildable SQLite index | Remote/multi-writer operation |
 | Scenarios | Five internal checks in an explicit list | Independently packaged third-party scenario is requested |
-| AI topology | One Reasoner in Milestone 3 | Specialization materially improves controlled evals |
-| Agent framework | None initially | A concrete orchestration responsibility is demonstrably costly |
 | MCP | Selected external adapter only | Two AI clients need the same stable capability |
 | Isolation | Known products in kind; unsafe inputs static-only | Unknown/privileged/shared execution is required |
 
 ## Next decision
 
-Define the runtime environment lifecycle and fingerprint required before the
-first kind-based installation experiment is added.
+Complete the provider-neutral Milestone 3 planning prototype, then agree on
+execution-budget defaults and first Kubernetes CPU scenario thresholds before
+live AI-controlled testing. The model/provider remains a per-run environment
+choice rather than a project-wide selection.

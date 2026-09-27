@@ -1,0 +1,17 @@
+replicaCount: 2
+
+image:
+  repository: kubeproof-cpu-fixture
+  tag: local
+  pullPolicy: IfNotPresent
+
+# Keep this constant when comparing resource or replica values.
+workIterations: 20000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 32Mi
+  limits:
+    cpu: 500m
+    memory: 128Mi

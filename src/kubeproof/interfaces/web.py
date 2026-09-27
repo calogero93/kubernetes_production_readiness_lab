@@ -8,10 +8,13 @@ from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 from kubeproof.evidence.history import HistoryError, HistoryService
+
+if TYPE_CHECKING:
+    from kubeproof.interfaces.live_jobs import LiveJobManager
 
 DEFAULT_FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
@@ -21,11 +24,34 @@ def _json_bytes(payload: Any) -> bytes:
 
 
 def make_handler(
-    service: HistoryService, frontend_dir: Path | None = None
+    service: HistoryService,
+    frontend_dir: Path | None = None,
+    live: LiveJobManager | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     frontend_root = (frontend_dir or DEFAULT_FRONTEND_DIST).resolve()
 
     class HistoryHandler(BaseHTTPRequestHandler):
+        def _read_json(self) -> dict[str, Any]:
+            if live is None:
+                raise ValueError("live CPU evaluation is unavailable; install the AI extra")
+            if self.headers.get("X-Kubeproof-CSRF") != live.csrf_token:
+                raise ValueError("missing or invalid local approval token")
+            if self.headers.get("Content-Type", "").split(";", 1)[0] != "application/json":
+                raise ValueError("Content-Type must be application/json")
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+            except ValueError as exc:
+                raise ValueError("Content-Length is required") from exc
+            if not 0 < length <= 15 * 1024 * 1024:
+                raise ValueError("request body exceeds the 15 MiB limit")
+            try:
+                body = json.loads(self.rfile.read(length))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("request body is not valid JSON") from exc
+            if not isinstance(body, dict):
+                raise ValueError("request body must be a JSON object")
+            return body
+
         def _respond(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
@@ -70,6 +96,34 @@ def make_handler(
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             try:
+                if path == "/api/live/config":
+                    self._respond(
+                        HTTPStatus.OK,
+                        _json_bytes(
+                            {
+                                "available": live is not None,
+                                "csrf_token": live.csrf_token if live is not None else None,
+                            }
+                        ),
+                        "application/json",
+                    )
+                    return
+                if path.startswith("/api/live/runs/"):
+                    if live is None:
+                        self._error(
+                            HTTPStatus.SERVICE_UNAVAILABLE, "live CPU evaluation is unavailable"
+                        )
+                        return
+                    job_id = path.removeprefix("/api/live/runs/")
+                    from kubeproof.interfaces.live_jobs import LiveJobError
+
+                    try:
+                        live_payload = live.get(job_id)
+                    except LiveJobError as exc:
+                        self._error(HTTPStatus.NOT_FOUND, str(exc))
+                        return
+                    self._respond(HTTPStatus.OK, _json_bytes(live_payload), "application/json")
+                    return
                 if path == "/api/evaluations":
                     payload = [asdict(item) for item in service.list_evaluations()]
                     self._respond(HTTPStatus.OK, _json_bytes(payload), "application/json")
@@ -95,7 +149,39 @@ def make_handler(
                 self._error(HTTPStatus.CONFLICT, str(exc))
 
         def do_POST(self) -> None:
-            if urlparse(self.path).path != "/api/sync":
+            path = urlparse(self.path).path
+            if path == "/api/live/preflight" or (
+                path.startswith("/api/live/runs/") and path.endswith("/approve")
+            ):
+                if live is None:
+                    self._error(
+                        HTTPStatus.SERVICE_UNAVAILABLE, "live CPU evaluation is unavailable"
+                    )
+                    return
+                from kubeproof.evidence.bundle import BundleError
+                from kubeproof.execution.helm import HelmRenderError
+                from kubeproof.interfaces.live_jobs import LiveJobError
+
+                try:
+                    body = self._read_json()
+                    if path == "/api/live/preflight":
+                        payload = live.prepare(body)
+                    else:
+                        job_id = (
+                            path.removeprefix("/api/live/runs/")
+                            .removesuffix("/approve")
+                            .rstrip("/")
+                        )
+                        digest = body.get("chart_sha256")
+                        if not isinstance(digest, str):
+                            raise LiveJobError("chart_sha256 is required for exact approval")
+                        payload = live.approve(job_id, digest)
+                except (ValueError, HelmRenderError, BundleError, OSError) as exc:
+                    self._error(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                self._respond(HTTPStatus.OK, _json_bytes(payload), "application/json")
+                return
+            if path != "/api/sync":
                 self._error(HTTPStatus.NOT_FOUND, "not found")
                 return
             try:
@@ -111,8 +197,18 @@ def make_handler(
 def serve_history(
     service: HistoryService, host: str, port: int, frontend_dir: Path | None = None
 ) -> None:
-    server = ThreadingHTTPServer((host, port), make_handler(service, frontend_dir))
+    live = None
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        try:
+            from kubeproof.interfaces.live_jobs import LiveJobManager
+        except ImportError:
+            pass
+        else:
+            live = LiveJobManager(service)
+    server = ThreadingHTTPServer((host, port), make_handler(service, frontend_dir, live))
     try:
         server.serve_forever()
     finally:
         server.server_close()
+        if live is not None:
+            live.close()

@@ -19,8 +19,8 @@ from kubeproof.core.domain import (
     Severity,
     SourceClass,
 )
-from kubeproof.core.manifests import iter_containers, iter_workloads, resource_ref
-from kubeproof.core.profile import CompanyProfile
+from kubeproof.core.manifests import Workload, iter_containers, iter_workloads, resource_ref
+from kubeproof.core.profile import CompanyProfile, SecurityConstraints
 from kubeproof.core.quantities import InvalidQuantity, parse_quantity
 
 
@@ -162,6 +162,79 @@ def _analyze_security(
     resources: tuple[dict[str, Any], ...], profile: CompanyProfile, result: _Accumulator
 ) -> None:
     constraints = profile.constraints.security
+    for workload in iter_workloads(resources):
+        _analyze_pod_security(workload, constraints, result)
+        _analyze_container_security(workload, constraints, result)
+
+
+def _analyze_pod_security(
+    workload: Workload, constraints: SecurityConstraints, result: _Accumulator
+) -> None:
+    pod_spec = workload.pod_spec
+    for field_name, observation_type, profile_value, label, constraint_path in (
+        (
+            "hostNetwork",
+            "security.host_network",
+            constraints.allow_host_network,
+            "host network",
+            "constraints.security.allow_host_network",
+        ),
+        (
+            "hostPID",
+            "security.host_pid",
+            constraints.allow_host_pid,
+            "host PID namespace",
+            "constraints.security.allow_host_pid",
+        ),
+        ("hostIPC", "security.host_ipc", None, "host IPC namespace", None),
+    ):
+        if pod_spec.get(field_name) is True:
+            observation = result.observe(
+                "static.security",
+                observation_type,
+                f"Workload requests the {label}.",
+                resource=workload.ref,
+                data={field_name: True},
+            )
+            result.finding(
+                "static.security",
+                _severity(profile_value is False),
+                f"Workload requests {label}",
+                f"The rendered Pod specification sets {field_name}: true.",
+                observation,
+                constraint=constraint_path if profile_value is False else None,
+            )
+    volumes = pod_spec.get("volumes", [])
+    if isinstance(volumes, list):
+        for volume in volumes:
+            if isinstance(volume, dict) and isinstance(volume.get("hostPath"), dict):
+                observation = result.observe(
+                    "static.security",
+                    "security.host_path",
+                    "Workload declares a hostPath volume.",
+                    resource=workload.ref,
+                    data={
+                        "volume": volume.get("name"),
+                        "path": volume["hostPath"].get("path"),
+                    },
+                )
+                result.finding(
+                    "static.security",
+                    _severity(constraints.allow_host_path is False),
+                    "Host filesystem mount requested",
+                    "The rendered Pod specification declares a hostPath volume.",
+                    observation,
+                    constraint=(
+                        "constraints.security.allow_host_path"
+                        if constraints.allow_host_path is False
+                        else None
+                    ),
+                )
+
+
+def _analyze_container_security(
+    workload: Workload, constraints: SecurityConstraints, result: _Accumulator
+) -> None:
     dangerous_capabilities = {
         "SYS_ADMIN",
         "SYS_MODULE",
@@ -171,193 +244,132 @@ def _analyze_security(
         "NET_ADMIN",
         "NET_RAW",
     }
-    for workload in iter_workloads(resources):
-        pod_spec = workload.pod_spec
-        for field_name, observation_type, profile_value, label, constraint_path in (
-            (
-                "hostNetwork",
-                "security.host_network",
-                constraints.allow_host_network,
-                "host network",
-                "constraints.security.allow_host_network",
-            ),
-            (
-                "hostPID",
-                "security.host_pid",
-                constraints.allow_host_pid,
-                "host PID namespace",
-                "constraints.security.allow_host_pid",
-            ),
-            ("hostIPC", "security.host_ipc", None, "host IPC namespace", None),
-        ):
-            if pod_spec.get(field_name) is True:
-                observation = result.observe(
-                    "static.security",
-                    observation_type,
-                    f"Workload requests the {label}.",
-                    resource=workload.ref,
-                    data={field_name: True},
-                )
-                result.finding(
-                    "static.security",
-                    _severity(profile_value is False),
-                    f"Workload requests {label}",
-                    f"The rendered Pod specification sets {field_name}: true.",
-                    observation,
-                    constraint=constraint_path if profile_value is False else None,
-                )
-        volumes = pod_spec.get("volumes", [])
-        if isinstance(volumes, list):
-            for volume in volumes:
-                if isinstance(volume, dict) and isinstance(volume.get("hostPath"), dict):
-                    observation = result.observe(
-                        "static.security",
-                        "security.host_path",
-                        "Workload declares a hostPath volume.",
-                        resource=workload.ref,
-                        data={
-                            "volume": volume.get("name"),
-                            "path": volume["hostPath"].get("path"),
-                        },
-                    )
-                    result.finding(
-                        "static.security",
-                        _severity(constraints.allow_host_path is False),
-                        "Host filesystem mount requested",
-                        "The rendered Pod specification declares a hostPath volume.",
-                        observation,
-                        constraint=(
-                            "constraints.security.allow_host_path"
-                            if constraints.allow_host_path is False
-                            else None
-                        ),
-                    )
+    pod_spec = workload.pod_spec
+    pod_context = pod_spec.get("securityContext", {})
+    if not isinstance(pod_context, dict):
+        pod_context = {}
+    for _, container in iter_containers(workload):
+        container_name = str(container["name"])
+        ref = _container_ref(workload.ref, container_name)
+        context = container.get("securityContext", {})
+        if not isinstance(context, dict):
+            context = {}
+        if context.get("privileged") is True:
+            observation = result.observe(
+                "static.security",
+                "security.privileged",
+                "Container requests privileged mode.",
+                resource=ref,
+                data={"privileged": True},
+            )
+            result.finding(
+                "static.security",
+                _severity(constraints.allow_privileged is False),
+                "Privileged container",
+                "The rendered container security context requests privileged mode.",
+                observation,
+                constraint=(
+                    "constraints.security.allow_privileged"
+                    if constraints.allow_privileged is False
+                    else None
+                ),
+            )
 
-        pod_context = pod_spec.get("securityContext", {})
-        if not isinstance(pod_context, dict):
-            pod_context = {}
-        for _, container in iter_containers(workload):
-            container_name = str(container["name"])
-            ref = _container_ref(workload.ref, container_name)
-            context = container.get("securityContext", {})
-            if not isinstance(context, dict):
-                context = {}
-            if context.get("privileged") is True:
-                observation = result.observe(
-                    "static.security",
-                    "security.privileged",
-                    "Container requests privileged mode.",
-                    resource=ref,
-                    data={"privileged": True},
-                )
-                result.finding(
-                    "static.security",
-                    _severity(constraints.allow_privileged is False),
-                    "Privileged container",
-                    "The rendered container security context requests privileged mode.",
-                    observation,
-                    constraint=(
-                        "constraints.security.allow_privileged"
-                        if constraints.allow_privileged is False
-                        else None
-                    ),
-                )
+        effective_non_root = context.get("runAsNonRoot", pod_context.get("runAsNonRoot"))
+        effective_uid = context.get("runAsUser", pod_context.get("runAsUser"))
+        if effective_non_root is not True or effective_uid == 0:
+            observation = result.observe(
+                "static.security",
+                "security.non_root_not_enforced",
+                "Non-root execution is not effectively enforced for the container.",
+                resource=ref,
+                data={
+                    "effective_run_as_non_root": effective_non_root,
+                    "effective_uid": effective_uid,
+                },
+            )
+            result.finding(
+                "static.security",
+                _severity(constraints.require_run_as_non_root is True),
+                "Non-root execution is not enforced",
+                (
+                    "The effective Pod/container security context does not prove non-root "
+                    "execution. This does not claim that the image actually runs as root."
+                ),
+                observation,
+                constraint=(
+                    "constraints.security.require_run_as_non_root"
+                    if constraints.require_run_as_non_root is True
+                    else None
+                ),
+                remediation="Set runAsNonRoot: true and use a known non-zero runtime UID.",
+            )
 
-            effective_non_root = context.get("runAsNonRoot", pod_context.get("runAsNonRoot"))
-            effective_uid = context.get("runAsUser", pod_context.get("runAsUser"))
-            if effective_non_root is not True or effective_uid == 0:
-                observation = result.observe(
-                    "static.security",
-                    "security.non_root_not_enforced",
-                    "Non-root execution is not effectively enforced for the container.",
-                    resource=ref,
-                    data={
-                        "effective_run_as_non_root": effective_non_root,
-                        "effective_uid": effective_uid,
-                    },
-                )
-                result.finding(
-                    "static.security",
-                    _severity(constraints.require_run_as_non_root is True),
-                    "Non-root execution is not enforced",
-                    (
-                        "The effective Pod/container security context does not prove non-root "
-                        "execution. This does not claim that the image actually runs as root."
-                    ),
-                    observation,
-                    constraint=(
-                        "constraints.security.require_run_as_non_root"
-                        if constraints.require_run_as_non_root is True
-                        else None
-                    ),
-                    remediation="Set runAsNonRoot: true and use a known non-zero runtime UID.",
-                )
+        if context.get("readOnlyRootFilesystem") is not True:
+            observation = result.observe(
+                "static.security",
+                "security.writable_root_filesystem",
+                "Read-only root filesystem is not explicitly enabled.",
+                resource=ref,
+                data={"read_only_root_filesystem": context.get("readOnlyRootFilesystem")},
+            )
+            result.finding(
+                "static.security",
+                _severity(constraints.require_read_only_root_filesystem is True),
+                "Writable root filesystem is permitted",
+                "The container does not explicitly set readOnlyRootFilesystem: true.",
+                observation,
+                constraint=(
+                    "constraints.security.require_read_only_root_filesystem"
+                    if constraints.require_read_only_root_filesystem is True
+                    else None
+                ),
+            )
 
-            if context.get("readOnlyRootFilesystem") is not True:
-                observation = result.observe(
-                    "static.security",
-                    "security.writable_root_filesystem",
-                    "Read-only root filesystem is not explicitly enabled.",
-                    resource=ref,
-                    data={"read_only_root_filesystem": context.get("readOnlyRootFilesystem")},
-                )
-                result.finding(
-                    "static.security",
-                    _severity(constraints.require_read_only_root_filesystem is True),
-                    "Writable root filesystem is permitted",
-                    "The container does not explicitly set readOnlyRootFilesystem: true.",
-                    observation,
-                    constraint=(
-                        "constraints.security.require_read_only_root_filesystem"
-                        if constraints.require_read_only_root_filesystem is True
-                        else None
-                    ),
-                )
+        if context.get("procMount") == "Unmasked":
+            observation = result.observe(
+                "static.security",
+                "security.unmasked_proc",
+                "Container requests an unmasked proc filesystem.",
+                resource=ref,
+            )
+            result.finding(
+                "static.security",
+                Severity.WARNING,
+                "Unmasked proc filesystem",
+                "The container security context sets procMount to Unmasked.",
+                observation,
+            )
 
-            if context.get("procMount") == "Unmasked":
-                observation = result.observe(
-                    "static.security",
-                    "security.unmasked_proc",
-                    "Container requests an unmasked proc filesystem.",
-                    resource=ref,
-                )
-                result.finding(
-                    "static.security",
-                    Severity.WARNING,
-                    "Unmasked proc filesystem",
-                    "The container security context sets procMount to Unmasked.",
-                    observation,
-                )
-
-            capabilities = context.get("capabilities", {})
-            added = capabilities.get("add", []) if isinstance(capabilities, dict) else []
-            if isinstance(added, list) and added:
-                normalized = tuple(sorted(str(capability).upper() for capability in added))
-                dangerous = tuple(cap for cap in normalized if cap in dangerous_capabilities)
-                observation_type = (
-                    "security.dangerous_capability" if dangerous else "security.added_capability"
-                )
-                observation = result.observe(
-                    "static.security",
-                    observation_type,
-                    "Container adds Linux capabilities.",
-                    resource=ref,
-                    data={"added": normalized, "dangerous": dangerous},
-                )
-                allowed = constraints.allowed_added_capabilities
-                disallowed = tuple(
-                    cap for cap in normalized if allowed is not None and cap not in allowed
-                )
-                result.finding(
-                    "static.security",
-                    _severity(bool(disallowed)),
-                    "Container adds Linux capabilities",
-                    f"The rendered security context adds: {', '.join(normalized)}.",
-                    observation,
-                    constraint=(
-                        "constraints.security.allowed_added_capabilities" if disallowed else None
-                    ),
-                )
+        capabilities = context.get("capabilities", {})
+        added = capabilities.get("add", []) if isinstance(capabilities, dict) else []
+        if isinstance(added, list) and added:
+            normalized = tuple(sorted(str(capability).upper() for capability in added))
+            dangerous = tuple(cap for cap in normalized if cap in dangerous_capabilities)
+            observation_type = (
+                "security.dangerous_capability" if dangerous else "security.added_capability"
+            )
+            observation = result.observe(
+                "static.security",
+                observation_type,
+                "Container adds Linux capabilities.",
+                resource=ref,
+                data={"added": normalized, "dangerous": dangerous},
+            )
+            allowed = constraints.allowed_added_capabilities
+            disallowed = tuple(
+                cap for cap in normalized if allowed is not None and cap not in allowed
+            )
+            result.finding(
+                "static.security",
+                _severity(bool(disallowed)),
+                "Container adds Linux capabilities",
+                f"The rendered security context adds: {', '.join(normalized)}.",
+                observation,
+                constraint=(
+                    "constraints.security.allowed_added_capabilities" if disallowed else None
+                ),
+            )
 
 
 def _resource_amount(container: dict[str, Any], section: str, name: str) -> Decimal | None:

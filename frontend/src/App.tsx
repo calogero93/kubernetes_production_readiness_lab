@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { getEvaluation, listEvaluations, syncEvaluations } from './api'
 import { EvaluationDetail } from './components/EvaluationDetail'
 import { EvaluationList } from './components/EvaluationList'
+import { LiveCpuRun } from './components/LiveCpuRun'
 import { filterEvaluations, summarize, type Filter } from './model'
 import type { Evaluation, EvaluationSummary } from './types'
 
@@ -24,6 +25,7 @@ export default function App() {
   const [detail, setDetail] = useState<Evaluation | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [view, setView] = useState<'history' | 'live'>('history')
 
   useEffect(() => {
     let active = true
@@ -76,12 +78,22 @@ export default function App() {
     }
   }
 
+  const showCompleted = useCallback((id: string) => {
+    setView('history')
+    setDetail(null)
+    setDetailError(null)
+    setDetailLoading(true)
+    setSelectedId(id)
+    void listEvaluations().then(setItems).catch((cause: unknown) => setError(String(cause)))
+  }, [])
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">K</span><span>KubeProof<small>Evidence workspace</small></span></div>
         <div className="nav-caption">Workspace</div>
-        <div className="nav-item nav-item--active"><span aria-hidden="true">▦</span> Evaluations</div>
+        <button className={view === 'history' ? 'nav-item nav-item--active' : 'nav-item'} type="button" onClick={() => setView('history')}><span aria-hidden="true">▦</span> Evaluations</button>
+        <button className={view === 'live' ? 'nav-item nav-item--active' : 'nav-item'} type="button" onClick={() => setView('live')}><span aria-hidden="true">◉</span> New CPU run</button>
         <div className="sidebar-bottom">
           <span className="online-dot" /> Local history
           <p>Bundles are the source of truth. This view is a rebuildable index.</p>
@@ -91,17 +103,18 @@ export default function App() {
       <main className="main-content">
         <header className="page-header">
           <div>
-            <span className="eyebrow">Overview / local evidence</span>
-            <h1>Evaluation history</h1>
-            <p>Trace every outcome back to checks, findings, and observations.</p>
+            <span className="eyebrow">{view === 'history' ? 'Overview / local evidence' : 'Experiment / local kind'}</span>
+            <h1>{view === 'history' ? 'Evaluation history' : 'New CPU run'}</h1>
+            <p>{view === 'history' ? 'Trace every outcome back to checks, findings, and observations.' : 'Review the chart and requirements before a real, bounded CPU trial.'}</p>
           </div>
-          <button className="primary-button" type="button" disabled={syncing} onClick={() => void sync()}>
+          {view === 'history' && <button className="primary-button" type="button" disabled={syncing} onClick={() => void sync()}>
             <span aria-hidden="true">↻</span> {syncing ? 'Syncing…' : 'Resync bundles'}
-          </button>
+          </button>}
         </header>
 
         {error && <div className="error-banner" role="alert">{error}</div>}
 
+        {view === 'live' ? <LiveCpuRun onCompleted={showCompleted} /> : <>
         <section className="stats-grid" aria-label="History summary">
           <div className="stat-card"><span>Evaluations</span><strong>{loading ? '—' : stats.total}</strong><small>Indexed runs</small></div>
           <div className="stat-card"><span>With blockers</span><strong className="text-bad">{loading ? '—' : stats.blocked}</strong><small>Require attention</small></div>
@@ -130,6 +143,7 @@ export default function App() {
           </div>
           {loading ? <div className="state-message">Loading evaluations…</div> : <EvaluationList items={visible} onSelect={openDetail} />}
         </section>
+        </>}
         <footer className="page-footer">KubeProof · Local, evidence-driven qualification</footer>
       </main>
 

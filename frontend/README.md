@@ -1,8 +1,9 @@
 # KubeProof frontend
 
 The local evidence explorer is a React + TypeScript application built with Vite.
-It reads the existing history JSON API; it does not execute Helm or Kubernetes
-experiments in the browser.
+The browser submits a Helm chart archive and confirmed CPU requirements to the
+loopback backend. Helm, Docker, kind and load generation run only in the backend,
+after static preflight and a separate explicit approval in the UI.
 
 For development, run the backend in one terminal and the Vite server in another:
 
@@ -22,3 +23,9 @@ actionable error while the API remains available. The build directory is
 generated and not committed.
 
 Run `npm test` for frontend tests; `npm run build` also typechecks.
+
+For the first real CPU experiment, install the Python `ai` extra even if you use
+the deterministic pilot, package `examples/charts/cpu-fixture` with Helm, and
+follow the [live CPU UI walkthrough](../docs/experiments/live-cpu-ui.md). Only
+the reviewed CPU fixture contract can receive load in this version; other
+uploaded charts may be inspected statically but cannot be run from this UI.

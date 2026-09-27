@@ -7,10 +7,10 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .52; }
-button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid #69d6bc; outline-offset: 3px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #69d6bc; outline-offset: 3px; }
 h1, h2, h3, h4, p { margin-top: 0; }
 h1, h2, h3, h4 { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
 code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -26,8 +26,10 @@ code, pre { overflow-wrap: anywhere; }
 .brand-mark { display: grid; place-items: center; width: 37px; height: 37px; flex: none; border-radius: 11px; color: #09221d; background: linear-gradient(140deg, #b5f5dc, #56c9b3); box-shadow: 0 5px 22px #54ccb53d; font-size: 22px; }
 .nav-caption { margin: 58px 13px 13px; color: #687993; font-size: 10px; font-weight: 700; letter-spacing: .17em; text-transform: uppercase; }
 .nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 9px; color: #9fb0c9; font-size: 13px; font-weight: 700; }
+.sidebar .nav-item { width: 100%; border: 1px solid transparent; background: transparent; text-align: left; }
+.sidebar .nav-item:hover { color: #f4f9ff; }
 .nav-item span { font-size: 19px; line-height: 1; }
-.nav-item--active { color: #a9f0da; background: #18392f; border: 1px solid #2b6b58; }
+.sidebar .nav-item--active { color: #a9f0da; background: #18392f; border-color: #2b6b58; }
 .sidebar-bottom { margin-top: auto; padding: 19px 12px 0; border-top: 1px solid #26344a; color: #c0d1e7; font-size: 12px; font-weight: 700; }
 .sidebar-bottom p { margin: 9px 0 0; color: #788ca8; font-size: 11px; line-height: 1.55; font-weight: 400; }
 .online-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #72e1ae; box-shadow: 0 0 0 4px #72e1ae1b; }
@@ -88,6 +90,22 @@ code, pre { overflow-wrap: anywhere; }
 .empty-state p { margin: 0; }
 .page-footer { margin: 30px 0 0; color: #647992; font-size: 11px; }
 
+.live-workspace { max-width: 980px; display: grid; gap: 22px; }
+.live-intro, .live-form, .live-review { background: #131f32; border: 1px solid #27374d; border-radius: 13px; padding: 24px 27px; }
+.live-intro h2, .live-review h3 { color: #f4f7fc; margin-bottom: 9px; }
+.live-intro p, .live-review p, .live-review li { color: #a7b8cd; font-size: 13px; line-height: 1.55; }
+.live-review code { overflow-wrap: anywhere; color: #a9f0da; }
+.live-inputs { border: 0; margin: 0; padding: 0; min-width: 0; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; margin-bottom: 21px; }
+.form-field { display: grid; gap: 7px; color: #b4c4d8; font-size: 12px; font-weight: 700; }
+.form-field--wide { grid-column: 1 / -1; }
+.form-field input, .form-field textarea { width: 100%; border: 1px solid #354a63; border-radius: 8px; background: #0d1829; color: #f3f7fc; padding: 10px 12px; font-size: 12px; }
+.form-field input[type=file] { padding: 11px; }
+.form-field textarea { resize: vertical; min-height: 210px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 1.45; }
+.form-checkbox { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 20px; color: #b4c4d8; font-size: 12px; line-height: 1.5; }
+.form-checkbox input { margin-top: 2px; accent-color: #72d9c0; }
+.live-review .primary-button { margin-top: 3px; }
+
 .drawer-backdrop { position: fixed; z-index: 20; inset: 0; display: flex; justify-content: flex-end; background: #030a16c9; backdrop-filter: blur(4px); }
 .detail-drawer { width: min(760px, 100vw); height: 100vh; overflow: auto; background: #101a2b; border-left: 1px solid #34506a; box-shadow: -20px 0 80px #0008; }
 .detail-drawer__top { position: sticky; z-index: 2; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 23px 30px 20px; background: #101a2b; border-bottom: 1px solid #2b3b50; }
@@ -142,4 +160,6 @@ code, pre { overflow-wrap: anywhere; }
   .toolbar, .panel-heading { padding-left: 17px; padding-right: 17px; }
   .search-box { width: 100%; }
   .detail-drawer__top, .detail-drawer__body { padding-left: 18px; padding-right: 18px; }
+  .form-grid { grid-template-columns: 1fr; }
+  .live-intro, .live-form, .live-review { padding: 20px 18px; }
 }

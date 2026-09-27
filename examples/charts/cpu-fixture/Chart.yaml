@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cpu-fixture
+description: Controlled CPU-bound HTTP workload for KubeProof experiments
+type: application
+version: 0.1.0
+appVersion: "1"

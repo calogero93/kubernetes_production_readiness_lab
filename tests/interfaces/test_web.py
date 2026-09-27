@@ -5,7 +5,10 @@ from http import HTTPStatus
 from io import BytesIO
 from pathlib import Path
 
+import pytest
+
 from kubeproof.evidence.history import HistoryService
+from kubeproof.interfaces.live_jobs import LiveJobManager
 from kubeproof.interfaces.web import make_handler
 
 
@@ -65,3 +68,46 @@ def test_frontend_index_symlink_cannot_escape_build_directory(tmp_path: Path) ->
     status, _, body = _get(service, frontend, "/")
     assert status == HTTPStatus.SERVICE_UNAVAILABLE
     assert b"private" not in body
+
+
+def test_live_preflight_requires_local_csrf_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = HistoryService.local(tmp_path / "data")
+    live = LiveJobManager(service)
+    called: list[dict[str, object]] = []
+
+    def prepare(payload: dict[str, object]) -> dict[str, object]:
+        called.append(payload)
+        return {"status": "prepared"}
+
+    monkeypatch.setattr(live, "prepare", prepare)
+
+    def post(token: str) -> tuple[int, dict[str, object]]:
+        handler = object.__new__(make_handler(service, tmp_path / "dist", live))
+        handler.wfile = BytesIO()
+        handler.rfile = BytesIO(b"{}")
+        handler.path = "/api/live/preflight"
+        handler.headers = {
+            "X-Kubeproof-CSRF": token,
+            "Content-Type": "application/json",
+            "Content-Length": "2",
+        }
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "POST /api/live/preflight HTTP/1.1"
+        handler.client_address = ("127.0.0.1", 0)
+        handler.log_message = lambda *_: None  # type: ignore[method-assign]
+        handler.do_POST()
+        headers, body = handler.wfile.getvalue().split(b"\r\n\r\n", 1)
+        return int(headers.split(b"\r\n", 1)[0].split()[1]), json.loads(body)
+
+    try:
+        status, _ = post("wrong")
+        assert status == HTTPStatus.BAD_REQUEST
+        assert called == []
+        status, payload = post(live.csrf_token)
+        assert status == HTTPStatus.OK
+        assert payload == {"status": "prepared"}
+        assert called == [{}]
+    finally:
+        live.close()

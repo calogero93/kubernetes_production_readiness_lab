@@ -74,3 +74,36 @@ export type Evaluation = {
   findings: Finding[]
   environment: { provider: string; kubernetes_server_version: string | null } | null
 }
+
+export type LiveConfig = {
+  available: boolean
+  csrf_token: string | null
+}
+
+export type LiveJob = {
+  id: string
+  status: 'prepared' | 'queued' | 'running' | 'completed' | 'error'
+  chart_name: string
+  chart_sha256: string
+  preview: Evaluation
+  load_error: string | null
+  use_ai: boolean
+  profile_name: string
+  confirmed_request: {
+    work_iterations: number
+    goal: {
+      target_rps: number
+      max_p95_ms: number
+      max_failed_requests: number
+      max_cpu_millicores: number
+    }
+    budget: {
+      max_plan_versions: number
+      max_elapsed_seconds: number
+      max_tool_calls: number
+      max_requests_per_trial: number
+    }
+  }
+  evaluation_id: string | null
+  error: string | null
+}
