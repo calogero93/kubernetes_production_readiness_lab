@@ -14,7 +14,7 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev --extra ai --extra tracing --no-editable
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm AS runtime
 ARG TARGETARCH
 ARG HELM_VERSION=3.21.1
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -35,3 +35,31 @@ ENV PATH="/opt/kubeproof/.venv/bin:${PATH}" \
 USER 10001:10001
 EXPOSE 8000
 CMD ["kubeproof", "serve", "--host", "0.0.0.0", "--port", "8000", "--data-dir", "/data", "--frontend-dir", "/opt/kubeproof/frontend"]
+
+FROM runtime AS local-lab
+USER root
+ARG TARGETARCH
+ARG KIND_VERSION=0.33.0
+ARG KUBECTL_VERSION=1.37.0
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io curl \
+    && curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-${TARGETARCH}" \
+    && curl -fsSLo /tmp/kind.sha256sum "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-${TARGETARCH}.sha256sum" \
+    && echo "$(cut -d ' ' -f 1 /tmp/kind.sha256sum)  /tmp/kind" | sha256sum -c - \
+    && install -m 0755 /tmp/kind /usr/local/bin/kind \
+    && curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
+    && curl -fsSLo /tmp/kubectl.sha256 "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl.sha256" \
+    && echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c - \
+    && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
+    && rm -rf /tmp/kind /tmp/kind.sha256sum /tmp/kubectl /tmp/kubectl.sha256 /var/lib/apt/lists/* \
+    && docker --version && kind --version && kubectl version --client
+
+FROM python-builder AS verification
+RUN uv sync --frozen --extra ai --extra tracing --extra dev --no-editable
+COPY --from=runtime /usr/local/bin/helm /usr/local/bin/helm
+ENV PATH="/opt/kubeproof/.venv/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/workspace/src
+WORKDIR /workspace
+CMD ["pytest", "-q", "-p", "no:cacheprovider"]
+
+FROM runtime AS production

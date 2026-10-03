@@ -6,7 +6,11 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from kubeproof.core.interpretation import AIInterpretation
+from kubeproof.core.plans import EvaluationPlan, PlanExecution
+from kubeproof.core.probe_options import HttpProbeOptions as HttpProbeOptions
 
 
 class StrictModel(BaseModel):
@@ -42,6 +46,7 @@ class Assessment(StrEnum):
 
 class AdmissionOutcome(StrEnum):
     ADMIT = "admit"
+    ADMIT_WITH_OPERATOR_APPROVAL = "admit_with_operator_approval"
     STATIC_ONLY = "static_only"
     REJECT_INVALID = "reject_invalid"
 
@@ -156,6 +161,29 @@ class CheckResult(StrictModel):
     )
 
 
+class OperatorApproval(StrictModel):
+    operator_label: str = Field(
+        min_length=1, max_length=80, description="Self-declared local operator label."
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Operator's reason for accepting local host access.",
+    )
+    scope_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 scope identifier accepted by the operator.",
+    )
+    approved_at: datetime = Field(description="UTC timestamp of the local approval.")
+
+    @field_validator("operator_label", "reason")
+    @classmethod
+    def single_line_text(cls, value: str) -> str:
+        if not value.strip() or "\n" in value or "\r" in value:
+            raise ValueError("operator approval fields must be nonempty single-line text")
+        return value.strip()
+
+
 class AdmissionDecision(StrictModel):
     outcome: AdmissionOutcome = Field(
         description="Decision controlling whether runtime evaluation may proceed."
@@ -164,7 +192,30 @@ class AdmissionDecision(StrictModel):
         default=(),
         description="Identifiers of safety rules that contributed to the admission decision.",
     )
+    approval_scope_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Exact local host-access approval scope, when available.",
+    )
+    operator_approval: OperatorApproval | None = Field(
+        default=None,
+        description="Recorded self-declared operator approval, when execution was approved.",
+    )
     explanation: str = Field(description="Human-readable rationale for the admission decision.")
+
+    @model_validator(mode="after")
+    def approval_is_consistent(self) -> AdmissionDecision:
+        if self.outcome is AdmissionOutcome.ADMIT_WITH_OPERATOR_APPROVAL:
+            if (
+                self.operator_approval is None
+                or self.approval_scope_sha256 is None
+                or self.operator_approval.scope_sha256 != self.approval_scope_sha256
+                or not self.matched_rule_ids
+            ):
+                raise ValueError("operator-approved admission requires a matching approval")
+        elif self.operator_approval is not None:
+            raise ValueError("operator approval requires operator-approved admission")
+        return self
 
 
 class InputIdentity(StrictModel):
@@ -223,6 +274,13 @@ class ExecutionOptions(StrictModel):
     max_recovery_targets: int | None = Field(
         default=None,
         description="Maximum number of workload targets selected for recovery testing.",
+    )
+    test_plan: EvaluationPlan | None = Field(
+        default=None, description="Frozen composition of registered probes."
+    )
+    http_probe: HttpProbeOptions | None = Field(
+        default=None,
+        description="Confirmed HTTP Service probe parameters, even when runtime is not tested.",
     )
 
 
@@ -306,9 +364,34 @@ class EvaluationResult(StrictModel):
         description="Tool versions and platform details for interpreting the evaluation.",
     )
 
+    ai_interpretation: AIInterpretation | None = Field(
+        default=None, description="Grounded AI commentary, separate from deterministic findings."
+    )
+    plan_execution: PlanExecution | None = Field(
+        default=None, description="Per-task execution of the frozen plan."
+    )
+
     @model_validator(mode="after")
     def references_are_consistent(self) -> EvaluationResult:
         observations = {item.id for item in self.observations}
+        check_ids_for_plan = {item.id for item in self.checks}
+        if self.plan_execution is not None:
+            plan = self.execution_options.test_plan
+            if plan is None or self.plan_execution.plan_sha256 != plan.digest():
+                raise ValueError("plan execution does not match the frozen plan")
+            if tuple(item.task_id for item in self.plan_execution.tasks) != tuple(
+                task.id for task in plan.tasks
+            ):
+                raise ValueError("plan execution must account for every task in plan order")
+            if any(set(item.check_ids) - check_ids_for_plan for item in self.plan_execution.tasks):
+                raise ValueError("plan task references unknown checks")
+        if self.ai_interpretation:
+            for point in self.ai_interpretation.points:
+                if (
+                    set(point.observation_ids) - observations
+                    or set(point.check_ids) - check_ids_for_plan
+                ):
+                    raise ValueError("AI interpretation references unknown evidence")
         findings = {item.id for item in self.findings}
         for finding in self.findings:
             missing = set(finding.observation_ids) - observations

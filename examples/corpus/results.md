@@ -1,11 +1,12 @@
 # Milestone 1 verification
 
 Verified on 2026-09-22 with the pinned archives in this directory and the
-`enterprise-strict` profile. The saved bundles are in [`evidence/`](evidence/).
-Each archive contains `evaluation.json`, `report.md`, the normalized profile,
-the rendered manifest, and collected artifacts. Extract an archive with
-`tar -xzf evidence/<name>.tar.gz -C <destination>`. Verify saved archive
-integrity with `cd evidence && sha256sum -c SHA256SUMS`.
+`enterprise-strict` profile. Original evidence archives are retained locally
+and excluded from Git because they contain workstation paths and operator
+metadata. The archive names below identify those historical runs; this checkout
+provides the inputs and scripts to generate new bundles. Each bundle contains
+`evaluation.json`, `report.md`, the normalized profile, the rendered manifest,
+and collected artifacts.
 
 ## Static corpus
 

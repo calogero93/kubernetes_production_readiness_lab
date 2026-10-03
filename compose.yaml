@@ -1,0 +1,49 @@
+services:
+  checks:
+    profiles: [checks]
+    build:
+      context: .
+      target: verification
+    volumes:
+      - ./:/workspace:ro
+    command: [pytest, -q, -p, "no:cacheprovider"]
+
+  frontend-checks:
+    profiles: [checks]
+    build:
+      context: .
+      target: frontend
+    command: [npm, test, --, --run]
+
+  local-lab:
+    build:
+      context: .
+      target: local-lab
+    network_mode: host
+    user: "0:0"
+    working_dir: /workspace
+    environment:
+      HOME: /data
+      XDG_CACHE_HOME: /data/.cache
+      KUBEPROOF_AI_PROVIDER: ${KUBEPROOF_AI_PROVIDER:-}
+      KUBEPROOF_AI_MODEL: ${KUBEPROOF_AI_MODEL:-}
+      KUBEPROOF_AI_BASE_URL: ${KUBEPROOF_AI_BASE_URL:-}
+      KUBEPROOF_AI_API_KEY: ${KUBEPROOF_AI_API_KEY:-}
+    volumes:
+      - ./:/workspace:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - kubeproof-data:/data
+    command:
+      - kubeproof
+      - serve
+      - --host
+      - 127.0.0.1
+      - --port
+      - "8000"
+      - --data-dir
+      - /data
+      - --frontend-dir
+      - /opt/kubeproof/frontend
+
+volumes:
+  kubeproof-data:

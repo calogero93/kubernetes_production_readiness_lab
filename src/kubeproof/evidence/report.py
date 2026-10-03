@@ -37,6 +37,113 @@ def render_markdown(evaluation: EvaluationResult) -> str:
     ]
     for check in evaluation.checks:
         lines.append(f"| {check.title} | `{check.execution_status}` | `{check.assessment}` |")
+    if evaluation.execution_options and (probe := evaluation.execution_options.http_probe):
+        namespace = evaluation.execution_options.namespace
+        p95_limit = probe.max_p95_ms if probe.max_p95_ms is not None else "unset"
+        lines.extend(
+            (
+                "",
+                "## HTTP Service probe",
+                "",
+                f"- Target: `http://{probe.service}.{namespace}.svc:{probe.port}{probe.path}`",
+                f"- Sequential GET requests: `{probe.requests}`",
+                f"- Expected HTTP status: `{probe.expected_status}`",
+                f"- Maximum failed requests: `{probe.max_failed_requests}`",
+                f"- Maximum p95 milliseconds: `{p95_limit}`",
+            )
+        )
+        for observation in evaluation.observations:
+            if observation.observation_type == "http.service_probe":
+                measurement = observation.data["measurement"]
+                lines.extend(
+                    (
+                        f"- Observed outcomes: `{measurement['outcomes']}`",
+                        f"- Observed p95 milliseconds: `{measurement['p95_ms']}`",
+                        f"- Evidence: `{observation.id}`",
+                        f"- Limitations: {observation.data['limitation']}",
+                    )
+                )
+    if plan := evaluation.execution_options.test_plan:
+        lines.extend(
+            (
+                "",
+                "## Frozen probe plan",
+                "",
+                f"- Origin: `{plan.origin}`",
+                f"- Objective: {plan.objective}",
+                f"- SHA-256: `{plan.digest()}`",
+                f"- Catalog version: `{plan.catalog_version}`",
+                f"- Budget: {plan.budget.max_tasks} tasks, "
+                f"{plan.budget.max_elapsed_seconds} seconds, "
+                f"{plan.budget.max_parallel_tasks} concurrent tasks.",
+                "- The plan does not change during execution.",
+                "",
+            )
+        )
+        executions = (
+            {item.task_id: item for item in evaluation.plan_execution.tasks}
+            if evaluation.plan_execution
+            else {}
+        )
+        for task in plan.tasks:
+            run = executions.get(task.id)
+            lines.extend(
+                (
+                    f"### {task.id} — {task.capability}",
+                    "",
+                    task.rationale,
+                    f"- Dependencies: {', '.join(task.depends_on) or 'none'}; "
+                    f"condition: `{task.when}`",
+                    f"- Parameters: `{task.parameters.model_dump_json()}`",
+                    f"- Execution: `{run.state if run else 'not_tested'}`",
+                )
+            )
+            if run and run.explanation:
+                lines.append(f"- Reason: {run.explanation}")
+            for observation in evaluation.observations:
+                if (
+                    observation.data.get("plan_task_id") == task.id
+                    and observation.observation_type == "http.service_probe"
+                ):
+                    measurement = observation.data["measurement"]
+                    lines.extend(
+                        (
+                            f"- Observed outcomes: `{measurement['outcomes']}`",
+                            f"- Observed p95 milliseconds: `{measurement['p95_ms']}`",
+                            f"- Evidence: `{observation.id}`",
+                            f"- Limitations: {observation.data['limitation']}",
+                        )
+                    )
+            lines.append("")
+    if interpretation := evaluation.ai_interpretation:
+        lines.extend(
+            (
+                "",
+                "## AI interpretation",
+                "",
+                f"Status: `{interpretation.status}`.",
+                "This commentary does not change deterministic findings or apply manifest changes.",
+                "",
+            )
+        )
+        if interpretation.error:
+            lines.append(f"Unavailable: {interpretation.error}")
+        for point in interpretation.points:
+            lines.extend(
+                (
+                    f"### {point.kind}",
+                    "",
+                    point.explanation,
+                    "- Evidence: "
+                    + ", ".join(f"`{key}`" for key in (*point.observation_ids, *point.check_ids)),
+                )
+            )
+            if point.suggested_manifest_change:
+                lines.append(f"- Suggested manifest change: {point.suggested_manifest_change}")
+            if point.verification:
+                lines.append(f"- Verify with a new evaluation: {point.verification}")
+            lines.append("")
+        lines.extend(f"- Limitation: {limit}" for limit in interpretation.limitations)
     if evaluation.environment:
         lines.extend(
             (
@@ -90,6 +197,24 @@ def render_markdown(evaluation: EvaluationResult) -> str:
             + ", ".join(f"`{rule}`" for rule in evaluation.admission.matched_rule_ids)
         )
         lines.append("")
+    if evaluation.admission.approval_scope_sha256:
+        lines.append(
+            "Local host-access approval scope SHA-256: "
+            f"`{evaluation.admission.approval_scope_sha256}`"
+        )
+        lines.append("")
+    if approval := evaluation.admission.operator_approval:
+        lines.extend(
+            (
+                "Operator approval: self-declared local acknowledgement; "
+                "identity was not authenticated.",
+                f"- Operator label: {approval.operator_label}",
+                f"- Reason: {approval.reason}",
+                f"- Approved at: {approval.approved_at.isoformat()}",
+                "- Approved host rules apply to product Pods observed during this run.",
+                "",
+            )
+        )
 
     lines.extend(("## Findings", ""))
     if not evaluation.findings:

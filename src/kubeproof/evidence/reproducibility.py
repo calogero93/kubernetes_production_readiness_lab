@@ -59,8 +59,8 @@ def _observations(evaluation: EvaluationResult, observation_type: str) -> list[O
 
 def _metric_peaks(
     evaluation: EvaluationResult,
-) -> dict[tuple[str, tuple[str, ...]], tuple[Decimal, Decimal]]:
-    peaks: dict[tuple[str, tuple[str, ...]], tuple[Decimal, Decimal]] = {}
+) -> dict[tuple[str, str, tuple[str, ...]], tuple[Decimal, Decimal]]:
+    peaks: dict[tuple[str, str, tuple[str, ...]], tuple[Decimal, Decimal]] = {}
     for sample in _observations(evaluation, "resources.pod_metrics_sample"):
         if sample.data.get("complete") is not True:
             continue
@@ -68,6 +68,7 @@ def _metric_peaks(
             raise ValueError(f"metric sample {sample.id} has no comparable workload identity")
         key = (
             sample.resource.namespace or "",
+            str(sample.data.get("plan_task_id", "")),
             tuple(sorted(str(item) for item in sample.data["containers_expected"])),
         )
         cpu = _number(sample.data.get("cpu_base_units"), "CPU")
@@ -77,12 +78,18 @@ def _metric_peaks(
     return peaks
 
 
-def _duration_by_resource(evaluation: EvaluationResult) -> dict[tuple[str, str], Decimal | None]:
-    durations: dict[tuple[str, str], Decimal | None] = {}
+def _duration_by_resource(
+    evaluation: EvaluationResult,
+) -> dict[tuple[str, str, str], Decimal | None]:
+    durations: dict[tuple[str, str, str], Decimal | None] = {}
     for sample in _observations(evaluation, "recovery.pod_replacement"):
         if sample.resource is None:
             raise ValueError(f"recovery observation {sample.id} has no resource")
-        key = (sample.resource.namespace or "", sample.resource.name)
+        key = (
+            sample.resource.namespace or "",
+            sample.resource.name,
+            str(sample.data.get("plan_task_id", "")),
+        )
         if key in durations:
             raise ValueError(f"duplicate recovery target: {key}")
         value = sample.data.get("ready_seconds")
@@ -144,6 +151,8 @@ def compare_evaluations(
     if profile_digest != first.input.profile_sha256:
         raise ValueError("comparison profile content does not match the evaluations")
 
+    if first.execution_options.test_plan != second.execution_options.test_plan:
+        raise ValueError("evaluations used different frozen plans")
     differences: list[str] = []
     limitations: list[str] = []
     if first.tool_fingerprint != second.tool_fingerprint:
@@ -176,12 +185,46 @@ def compare_evaluations(
         f for f in second.findings if f.check_id.startswith("static.")
     ):
         differences.append("static findings differ")
-    if first.admission != second.admission:
+    first_admission = first.admission.model_dump(exclude={"operator_approval"})
+    second_admission = second.admission.model_dump(exclude={"operator_approval"})
+    if first_admission != second_admission or (
+        (first.admission.operator_approval is None) != (second.admission.operator_approval is None)
+    ):
         differences.append("admission decisions differ")
     if _runtime_checks(first) != _runtime_checks(second):
         differences.append("runtime check execution or assessments differ")
     if _runtime_findings(first) != _runtime_findings(second):
         differences.append("runtime finding classifications differ")
+
+    first_http = {item.check_id: item for item in _observations(first, "http.service_probe")}
+    second_http = {item.check_id: item for item in _observations(second, "http.service_probe")}
+    if first_http.keys() != second_http.keys():
+        differences.append("HTTP probe task measurements differ")
+    for key in sorted(first_http.keys() & second_http.keys()):
+        left_http, right_http = first_http[key], second_http[key]
+        suffix = f" for {key}" if len(first_http) > 1 else ""
+        if left_http.data["measurement"]["outcomes"] != right_http.data["measurement"]["outcomes"]:
+            differences.append("HTTP response outcome counts differ" + suffix)
+        left_p95 = _number(left_http.data["measurement"]["p95_ms"], "HTTP p95")
+        right_p95 = _number(right_http.data["measurement"]["p95_ms"], "HTTP p95")
+        if abs(left_p95 - right_p95) > max(
+            Decimal("5"), max(left_p95, right_p95) * Decimal("0.20")
+        ):
+            differences.append("HTTP p95 latencies exceed 5 milliseconds / 20% tolerance" + suffix)
+        if left_http.data.get("probe_image_id") != right_http.data.get("probe_image_id"):
+            limitations.append("HTTP probe image fingerprints differ" + suffix)
+    plan = first.execution_options.test_plan
+    expected_http = (
+        sum(task.capability == "http_service" for task in plan.tasks)
+        if plan
+        else int(first.execution_options.http_probe is not None)
+    )
+    if (
+        expected_http
+        and (len(first_http) != expected_http or len(second_http) != expected_http)
+        and (first_environment is not None or second_environment is not None)
+    ):
+        limitations.append("one or both HTTP probes lack complete measurements")
 
     first_install = _installation_duration(first)
     second_install = _installation_duration(second)
@@ -227,7 +270,11 @@ def compare_evaluations(
     for metric_key in sorted(first_peaks.keys() & second_peaks.keys()):
         first_cpu, first_memory = first_peaks[metric_key]
         second_cpu, second_memory = second_peaks[metric_key]
-        name = f"{metric_key[0]}/" + ",".join(metric_key[1])
+        name = (
+            f"{metric_key[0]}/"
+            + ",".join(metric_key[2])
+            + (f" [{metric_key[1]}]" if metric_key[1] else "")
+        )
         if cpu_limit is not None and abs(first_cpu - second_cpu) > cpu_peak_tolerance(
             first_cpu, second_cpu, parse_quantity(cpu_limit)
         ):

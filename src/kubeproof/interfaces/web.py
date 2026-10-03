@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import threading
 import time
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlsplit
 
 from kubeproof.evidence.history import HistoryError, HistoryService
 from kubeproof.observability import HTTP_DURATION, HTTP_REQUESTS, metrics_response, route_name
 
 if TYPE_CHECKING:
+    from kubeproof.interfaces.chart_jobs import ChartJobManager
     from kubeproof.interfaces.live_jobs import LiveJobManager
 
 DEFAULT_FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
@@ -29,14 +31,27 @@ def make_handler(
     service: HistoryService,
     frontend_dir: Path | None = None,
     live: LiveJobManager | None = None,
+    chart: ChartJobManager | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     frontend_root = (frontend_dir or DEFAULT_FRONTEND_DIST).resolve()
 
     class HistoryHandler(BaseHTTPRequestHandler):
-        def _read_json(self) -> dict[str, Any]:
-            if live is None:
-                raise ValueError("live CPU evaluation is unavailable; install the AI extra")
-            if self.headers.get("X-Kubeproof-CSRF") != live.csrf_token:
+        def _has_local_host(self) -> bool:
+            host = self.headers.get("Host", "")
+            try:
+                parsed = urlsplit(f"//{host}")
+            except ValueError:
+                return False
+            return (
+                parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+                and parsed.username is None
+                and parsed.password is None
+            )
+
+        def _read_json(self, csrf_token: str) -> dict[str, Any]:
+            if not self._has_local_host():
+                raise ValueError("local API requires a loopback Host header")
+            if self.headers.get("X-Kubeproof-CSRF") != csrf_token:
                 raise ValueError("missing or invalid local approval token")
             if self.headers.get("Content-Type", "").split(";", 1)[0] != "application/json":
                 raise ValueError("Content-Type must be application/json")
@@ -106,6 +121,13 @@ def make_handler(
             self._started_at = time.perf_counter()
             path = urlparse(self.path).path
             try:
+                if (
+                    (live is not None or chart is not None)
+                    and path.startswith("/api/")
+                    and not self._has_local_host()
+                ):
+                    self._error(HTTPStatus.BAD_REQUEST, "local API requires a loopback Host header")
+                    return
                 if path == "/metrics":
                     body, content_type = metrics_response()
                     self._respond(HTTPStatus.OK, body, content_type)
@@ -124,6 +146,31 @@ def make_handler(
                         ),
                         "application/json",
                     )
+                    return
+                if path == "/api/chart/config":
+                    self._respond(
+                        HTTPStatus.OK,
+                        _json_bytes(
+                            {
+                                "available": chart is not None,
+                                "csrf_token": chart.csrf_token if chart is not None else None,
+                            }
+                        ),
+                        "application/json",
+                    )
+                    return
+                if path.startswith("/api/chart/runs/"):
+                    if chart is None:
+                        self._error(HTTPStatus.SERVICE_UNAVAILABLE, "chart runs are unavailable")
+                        return
+                    from kubeproof.interfaces.chart_jobs import ChartJobError
+
+                    try:
+                        chart_payload = chart.get(path.removeprefix("/api/chart/runs/"))
+                    except ChartJobError as exc:
+                        self._error(HTTPStatus.NOT_FOUND, str(exc))
+                        return
+                    self._respond(HTTPStatus.OK, _json_bytes(chart_payload), "application/json")
                     return
                 if path.startswith("/api/live/runs/"):
                     if live is None:
@@ -181,7 +228,7 @@ def make_handler(
                 from kubeproof.interfaces.live_jobs import LiveJobError
 
                 try:
-                    body = self._read_json()
+                    body = self._read_json(live.csrf_token)
                     if path == "/api/live/preflight":
                         payload = live.prepare(body)
                     else:
@@ -194,6 +241,55 @@ def make_handler(
                         if not isinstance(digest, str):
                             raise LiveJobError("chart_sha256 is required for exact approval")
                         payload = live.approve(job_id, digest)
+                except (ValueError, HelmRenderError, BundleError, OSError) as exc:
+                    self._error(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                self._respond(HTTPStatus.OK, _json_bytes(payload), "application/json")
+                return
+            if path == "/api/chart/preflight" or (
+                path.startswith("/api/chart/runs/") and path.endswith("/approve")
+            ):
+                if chart is None:
+                    self._error(HTTPStatus.SERVICE_UNAVAILABLE, "chart runs are unavailable")
+                    return
+                from kubeproof.evidence.bundle import BundleError
+                from kubeproof.execution.helm import HelmRenderError
+
+                try:
+                    body = self._read_json(chart.csrf_token)
+                    if path == "/api/chart/preflight":
+                        payload = chart.prepare(body)
+                    else:
+                        job_id = (
+                            path.removeprefix("/api/chart/runs/")
+                            .removesuffix("/approve")
+                            .rstrip("/")
+                        )
+                        chart_sha256 = body.get("chart_sha256")
+                        rendered_sha256 = body.get("rendered_manifest_sha256")
+                        if not isinstance(chart_sha256, str) or not isinstance(
+                            rendered_sha256, str
+                        ):
+                            raise ValueError("chart and rendered manifest SHA-256 are required")
+                        approval_fields = (
+                            body.get("approval_scope_sha256"),
+                            body.get("operator_label"),
+                            body.get("approval_reason"),
+                        )
+                        if any(
+                            value is not None and not isinstance(value, str)
+                            for value in approval_fields
+                        ):
+                            raise ValueError("approval fields must be strings")
+                        payload = chart.approve(
+                            job_id,
+                            chart_sha256=chart_sha256,
+                            rendered_manifest_sha256=rendered_sha256,
+                            approval_scope_sha256=approval_fields[0],
+                            operator_label=approval_fields[1],
+                            approval_reason=approval_fields[2],
+                            plan_sha256=body.get("plan_sha256"),
+                        )
                 except (ValueError, HelmRenderError, BundleError, OSError) as exc:
                     self._error(HTTPStatus.BAD_REQUEST, str(exc))
                     return
@@ -216,17 +312,24 @@ def serve_history(
     service: HistoryService, host: str, port: int, frontend_dir: Path | None = None
 ) -> None:
     live = None
+    chart = None
     if host in {"127.0.0.1", "localhost", "::1"}:
+        from kubeproof.interfaces.chart_jobs import ChartJobManager
+
+        run_lock = threading.Lock()
+        chart = ChartJobManager(service, run_lock)
         try:
             from kubeproof.interfaces.live_jobs import LiveJobManager
         except ImportError:
             pass
         else:
-            live = LiveJobManager(service)
-    server = ThreadingHTTPServer((host, port), make_handler(service, frontend_dir, live))
+            live = LiveJobManager(service, run_lock)
+    server = ThreadingHTTPServer((host, port), make_handler(service, frontend_dir, live, chart))
     try:
         server.serve_forever()
     finally:
         server.server_close()
         if live is not None:
             live.close()
+        if chart is not None:
+            chart.close()

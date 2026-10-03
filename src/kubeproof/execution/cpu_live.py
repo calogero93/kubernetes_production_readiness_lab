@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from kubeproof.core.domain import (
@@ -20,15 +18,14 @@ from kubeproof.core.domain import (
     Severity,
     SourceClass,
 )
+from kubeproof.core.plans import CpuParameters, CpuTask, EvaluationPlan, PlanBudget
+from kubeproof.core.profile import CompanyProfile
 from kubeproof.execution.cpu_fixture import validate_fixture_resources
-from kubeproof.execution.cpu_worker import CpuLoadWorker, prepare_fixture_image
+from kubeproof.execution.cpu_worker import CpuLoadWorker
 from kubeproof.execution.helm import HelmRenderRequest
-from kubeproof.execution.kubernetes import ClusterReader
 from kubeproof.execution.runtime import ExperimentEvidence
-from kubeproof.intelligence.capabilities import CapabilityCatalog, cpu_capabilities
+from kubeproof.intelligence.capabilities import CapabilityCatalog
 from kubeproof.intelligence.control import PlanRejected, validate_plan, validate_records
-from kubeproof.intelligence.model_adapter import LangChainSupervisor
-from kubeproof.intelligence.model_config import create_chat_model
 from kubeproof.intelligence.models import (
     MAX_EXECUTION_ATTEMPTS,
     ConfirmedRequest,
@@ -39,7 +36,7 @@ from kubeproof.intelligence.models import (
     TrialRecord,
     TrialStatus,
 )
-from kubeproof.intelligence.workflow import TrialInfrastructureError, build_graph, initial_state
+from kubeproof.intelligence.workflow import TrialInfrastructureError
 
 _CHECK_ID = "runtime.cpu_load"
 _TITLE = "Bounded real CPU load on one fixture Pod"
@@ -238,49 +235,77 @@ def _report(
 
 
 class CpuLiveExperiment:
-    """Small entry point read in order: validate, prepare, run, report."""
-
-    check_id = _CHECK_ID
-    title = _TITLE
+    """Compatibility intake: build a fixed baseline plan, never replan during a run."""
 
     def __init__(self, request: ConfirmedRequest, *, use_ai: bool = False) -> None:
         self.request = request
-        self.catalog = cpu_capabilities(live=True)
-        self.supervisor = LangChainSupervisor(create_chat_model()) if use_ai else None
+        self.use_ai = use_ai
+        self.intelligence = None
+        if use_ai:
+            from kubeproof.intelligence.evaluation import EvaluationAI
+
+            self.intelligence = EvaluationAI()
         if not use_ai and request.budget.max_plan_versions != 1:
             raise ValueError("pilot mode requires max_plan_versions=1")
 
-    def validate_resources(
-        self, resources: tuple[dict[str, Any], ...], request: HelmRenderRequest
-    ) -> None:
-        validate_fixture_resources(resources, request, self.request)
-
-    def prepare(self, cluster_name: str, kubeconfig: Path) -> None:
-        del kubeconfig
-        prepare_fixture_image(cluster_name)
-
-    def run(
+    def baseline_plan(
         self,
-        cluster: ClusterReader,
-        kubeconfig: Path,
-        namespace: str,
-        cancel_if: Callable[[], bool],
-    ) -> ExperimentEvidence:
-        worker = CpuLoadWorker(cluster, kubeconfig, namespace, cancel_if)
-        if self.supervisor is None:
-            run = _run_pilot(self.request, self.catalog, worker)
-        else:
-            graph = build_graph(
-                self.supervisor,
-                {"cpu_load": worker},
-                _Admission(self.catalog),
-                catalog=self.catalog,
+        resources: tuple[dict[str, Any], ...],
+        render: HelmRenderRequest,
+        profile: CompanyProfile,
+    ) -> EvaluationPlan:
+        from kubeproof.core.manifests import redact_manifest
+
+        validate_fixture_resources(resources, render, self.request)
+        request = self.request
+        goal = request.goal
+        budget = PlanBudget(
+            max_tasks=min(32, request.budget.max_tool_calls),
+            max_elapsed_seconds=min(1800, request.budget.max_elapsed_seconds),
+        )
+        objective = "Evaluate the confirmed CPU fixture goal: " + goal.model_dump_json()
+        cpu = CpuTask(
+            id="cpu-pilot",
+            rationale="Fixed 30-second trial at the confirmed target rate.",
+            parameters=CpuParameters(
+                work_iterations=request.work_iterations,
+                offered_rps=goal.target_rps,
+                requests=math.ceil(goal.target_rps * 30),
+                min_success_rps=goal.target_rps,
+                max_p95_ms=goal.max_p95_ms,
+                max_failed_requests=goal.max_failed_requests,
+                max_cpu_millicores=goal.max_cpu_millicores,
+            ),
+        )
+        if cpu.parameters.requests > request.budget.max_requests_per_trial:
+            raise ValueError("CPU task exceeds the confirmed per-trial request budget")
+        plan = EvaluationPlan(
+            origin="deterministic", objective=objective, budget=budget, tasks=(cpu,)
+        )
+        if self.intelligence:
+            plan = self.intelligence.propose(
+                {
+                    "objective": objective,
+                    "budget": budget.model_dump(mode="json"),
+                    "confirmed_cpu_request": request.model_dump(mode="json"),
+                    "profile": profile.model_dump(mode="json"),
+                    "rendered_manifest": redact_manifest(resources),
+                }
             )
-            state = graph.invoke(initial_state(self.request), {"recursion_limit": 80})
-            run = _CpuRun(
-                plan=TestPlan.model_validate(state["plan"]) if state["plan"] else None,
-                records=tuple(TrialRecord.model_validate(item) for item in state["records"]),
-                outcome=RunOutcome(state["outcome"]),
-                explanation=state["explanation"],
-            )
-        return _report(self.request, self.catalog, worker, namespace, run)
+            if plan.origin != "ai" or plan.budget != budget or plan.objective != objective:
+                raise ValueError("AI CPU plan changed confirmed objective or budget")
+            cpu_tasks = [task for task in plan.tasks if isinstance(task, CpuTask)]
+            if not cpu_tasks:
+                raise ValueError("CPU plan must include a CPU load task")
+            for task in cpu_tasks:
+                p = task.parameters
+                if (
+                    p.work_iterations != request.work_iterations
+                    or p.min_success_rps != goal.target_rps
+                    or p.max_p95_ms != goal.max_p95_ms
+                    or p.max_failed_requests != goal.max_failed_requests
+                    or p.max_cpu_millicores != goal.max_cpu_millicores
+                    or p.requests > request.budget.max_requests_per_trial
+                ):
+                    raise ValueError("AI CPU task changed confirmed work, goals or request budget")
+        return plan

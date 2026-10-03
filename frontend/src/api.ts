@@ -1,4 +1,4 @@
-import type { Evaluation, EvaluationSummary, LiveConfig, LiveJob } from './types'
+import type { ChartJob, Evaluation, EvaluationSummary, LiveConfig, LiveJob } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, options)
@@ -41,3 +41,22 @@ export const approveLiveRun = (id: string, chartSha256: string, token: string) =
 
 export const getLiveRun = (id: string) =>
   request<LiveJob>(`/api/live/runs/${encodeURIComponent(id)}`)
+
+export const getChartConfig = () => request<LiveConfig>('/api/chart/config')
+
+export const prepareChartRun = (body: object, token: string) =>
+  request<ChartJob>('/api/chart/preflight', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Kubeproof-CSRF': token },
+    body: JSON.stringify(body),
+  })
+
+export const approveChartRun = (id: string, body: object, token: string) =>
+  request<ChartJob>(`/api/chart/runs/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Kubeproof-CSRF': token },
+    body: JSON.stringify(body),
+  })
+
+export const getChartRun = (id: string) =>
+  request<ChartJob>(`/api/chart/runs/${encodeURIComponent(id)}`)

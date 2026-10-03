@@ -1,0 +1,68 @@
+{
+  "schema_version": "1",
+  "catalog_version": "1",
+  "origin": "user",
+  "objective": "Observe HTTP and sampled resource usage during a bounded CPU fixture trial.",
+  "budget": {
+    "max_tasks": 8,
+    "max_elapsed_seconds": 180,
+    "max_parallel_tasks": 3
+  },
+  "tasks": [
+    {
+      "id": "cpu",
+      "capability": "cpu_load",
+      "rationale": "Run one fixed 30-second CPU-bound trial.",
+      "parameters": {
+        "work_iterations": 20000,
+        "offered_rps": 5,
+        "requests": 150,
+        "min_success_rps": 4.5,
+        "max_p95_ms": 500,
+        "max_failed_requests": 0,
+        "max_cpu_millicores": 500
+      }
+    },
+    {
+      "id": "http",
+      "capability": "http_service",
+      "rationale": "Check Service health while the CPU trial is active.",
+      "parameters": {
+        "service": "kubeproof-target",
+        "port": 8080,
+        "path": "/healthz",
+        "requests": 10,
+        "expected_status": 200,
+        "max_failed_requests": 0,
+        "max_p95_ms": 500
+      }
+    },
+    {
+      "id": "resources",
+      "capability": "resource_sample",
+      "rationale": "Collect CPU and memory samples during the CPU trial.",
+      "parameters": {
+        "duration_seconds": 40
+      }
+    },
+    {
+      "id": "after-load",
+      "capability": "http_service",
+      "depends_on": [
+        "cpu",
+        "resources"
+      ],
+      "when": "completed",
+      "rationale": "Check health after the load and sampling finish.",
+      "parameters": {
+        "service": "kubeproof-target",
+        "port": 8080,
+        "path": "/healthz",
+        "requests": 5,
+        "expected_status": 200,
+        "max_failed_requests": 0,
+        "max_p95_ms": 500
+      }
+    }
+  ]
+}

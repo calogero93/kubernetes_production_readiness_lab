@@ -23,6 +23,7 @@ from kubeproof.core.domain import (
     Severity,
     SourceClass,
 )
+from kubeproof.core.plans import PlanExecution
 from kubeproof.core.profile import CompanyProfile
 from kubeproof.execution.environment import EnvironmentError, KindProvider, temporary_kubeconfig
 from kubeproof.execution.helm import HelmInstaller, HelmRenderError, HelmRenderRequest
@@ -58,6 +59,7 @@ class RuntimeResult:
     findings: tuple[Finding, ...]
     environment: EnvironmentInfo
     artifacts: dict[str, str]
+    plan_execution: PlanExecution | None = None
 
 
 @dataclass(frozen=True)
@@ -98,7 +100,11 @@ class _RuntimeEvidence:
         return observation
 
     def add_experiment(self, result: ExperimentEvidence) -> None:
-        self.experiment_checks.extend(result.checks)
+        for check in result.checks:
+            if check.id in _RUNTIME_TITLES:
+                self.checks[check.id] = check
+            else:
+                self.experiment_checks.append(check)
         self.observations.extend(result.observations)
         self.findings.extend(result.findings)
         self.artifacts.update(result.artifacts)
@@ -402,11 +408,15 @@ def _run_experiment(
 ) -> ExperimentEvidence:
     if not installation_ready:
         reason = "Installation did not reach a ready baseline."
-    elif metrics_error is not None or collector is None:
+    elif getattr(experiment, "requires_metrics", True) and (
+        metrics_error is not None or collector is None
+    ):
         reason = metrics_error or "Metrics collector did not start"
     else:
         reason = None
     if reason is not None:
+        if hasattr(experiment, "not_run"):
+            return experiment.not_run(reason, failed=installation_ready)  # type: ignore[no-any-return]
         return ExperimentEvidence(
             (
                 _untested(
@@ -422,6 +432,10 @@ def _run_experiment(
         )
     try:
         return experiment.run(cluster, kubeconfig, namespace, monitor.triggered.is_set)
+    except UnsafeWorkloadError as exc:
+        if monitor.infrastructure_error:
+            raise KubernetesError(monitor.reason or "dynamic workload monitor failed") from exc
+        raise
     except (KubernetesError, HelmRenderError, OSError, ValueError) as exc:
         return ExperimentEvidence(
             (_untested(experiment.check_id, experiment.title, str(exc), failed=True),),
@@ -443,6 +457,7 @@ def run_runtime(
     installer: HelmInstaller | None = None,
     cluster_factory: Callable[[Path], ClusterReader] = ClusterReader,
     experiment: RuntimeExperiment | None = None,
+    approved_host_rule_ids: tuple[str, ...] = (),
 ) -> RuntimeResult:
     """Run one disposable evaluation; always attempt cluster teardown after create."""
     kind = provider or KindProvider()
@@ -472,7 +487,7 @@ def run_runtime(
         if isinstance(cluster, ClusterReader):
             with suppress(KubernetesError):
                 kubernetes_server_version = cluster.server_version()
-        monitor = _SafetyMonitor(cluster, request.namespace, profile)
+        monitor = _SafetyMonitor(cluster, request.namespace, profile, approved_host_rule_ids)
         monitor.start()
         try:
             install_metrics_server(kubeconfig, cluster)
@@ -485,7 +500,7 @@ def run_runtime(
                 dns_error = "CoreDNS did not become Ready after enabling query logs"
         except KubernetesError as exc:
             dns_error = str(exc)
-        if metrics_error is None:
+        if metrics_error is None and not getattr(experiment, "owns_runtime_checks", False):
             collector = _MetricsCollector(cluster, request.namespace)
             collector.start()
         install_attempted = True
@@ -503,6 +518,13 @@ def run_runtime(
         if installation.finding is not None:
             evidence.findings.append(installation.finding)
         if experiment is not None:
+            if hasattr(experiment, "configure_runtime"):
+                experiment.configure_runtime(
+                    monitor=monitor,
+                    deployments=installation.deployments,
+                    metrics_error=metrics_error,
+                    dns_error=dns_error,
+                )
             experiment_result = _run_experiment(
                 experiment,
                 cluster,
@@ -514,7 +536,9 @@ def run_runtime(
                 collector,
             )
             evidence.add_experiment(experiment_result)
-        if not installation.ready:
+        if getattr(experiment, "owns_runtime_checks", False):
+            _remaining_checks(evidence.checks, "Not selected in the frozen plan.", failed=False)
+        elif not installation.ready:
             if collector is not None:
                 collector.stop()
             _remaining_checks(
@@ -582,13 +606,25 @@ def run_runtime(
         )
     except UnsafeWorkloadError as exc:
         _remaining_checks(evidence.checks, str(exc), failed=False, cancelled=True)
-        if experiment is not None and not evidence.experiment_checks:
+        if (
+            experiment is not None
+            and hasattr(experiment, "not_run")
+            and not getattr(experiment, "execution", None)
+        ):
+            evidence.add_experiment(experiment.not_run(str(exc), cancelled=True))
+        elif experiment is not None and not evidence.experiment_checks:
             evidence.experiment_checks.append(
                 _untested(experiment.check_id, experiment.title, str(exc), cancelled=True)
             )
     except (EnvironmentError, KubernetesError, OSError) as exc:
         _remaining_checks(evidence.checks, str(exc), failed=True)
-        if experiment is not None and not evidence.experiment_checks:
+        if (
+            experiment is not None
+            and hasattr(experiment, "not_run")
+            and not getattr(experiment, "execution", None)
+        ):
+            evidence.add_experiment(experiment.not_run(str(exc), failed=True))
+        elif experiment is not None and not evidence.experiment_checks:
             evidence.experiment_checks.append(
                 _untested(experiment.check_id, experiment.title, str(exc), failed=True)
             )
@@ -628,4 +664,5 @@ def run_runtime(
             ).hexdigest(),
         ),
         artifacts=evidence.artifacts,
+        plan_execution=getattr(experiment, "execution", None),
     )

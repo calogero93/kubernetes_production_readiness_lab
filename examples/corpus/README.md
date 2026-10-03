@@ -1,8 +1,9 @@
 # Milestone 1 reference corpus
 
 The chart archives are the exact inputs used for the first public-product corpus.
-See [the verified results](results.md) and the saved evidence bundles in
-[`evidence/`](evidence/).
+See [the recorded verification results](results.md). Original evidence bundles
+are retained locally and excluded from Git because they contain workstation
+paths and operator metadata. Generate your own bundles with the scripts below.
 Run `./run.sh static` to create four static bundles, including the default and
 local kube-prometheus-stack configurations. Run `./run.sh runtime` on a machine
 with Docker to create the three runtime bundles. Both commands verify

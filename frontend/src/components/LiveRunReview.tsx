@@ -1,4 +1,5 @@
 import type { LiveJob } from '../types'
+import { PlanView } from './PlanView'
 
 type Props = {
   job: LiveJob
@@ -17,7 +18,8 @@ export function LiveRunReview({ job, approved, busy, onApprovalChange, onStart }
       <p><strong>{job.chart_name}</strong> · SHA-256 <code>{job.chart_sha256}</code></p>
       <p>Confirmed profile: <strong>{job.profile_name}</strong> · {job.use_ai ? 'AI supervisor' : 'deterministic pilot'}</p>
       <p>Goal: at least {goal.target_rps} successful req/s, p95 at most {goal.max_p95_ms} ms, at most {goal.max_failed_requests} failures, sampled Pod CPU at most {goal.max_cpu_millicores} mCPU. Work: {job.confirmed_request.work_iterations} iterations/request.</p>
-      <p>Experiment budget: {budget.max_plan_versions} plan version(s), {budget.max_tool_calls} tool calls, {budget.max_requests_per_trial} requests/trial and {budget.max_elapsed_seconds} seconds for planning/trials. Cluster setup has separate timeouts.</p>
+      <p>Confirmed limits: {budget.max_tool_calls} tool calls, {budget.max_requests_per_trial} requests/trial and {budget.max_elapsed_seconds} seconds. The reviewed baseline plan remains fixed during execution. Cluster setup has separate timeouts.</p>
+      <PlanView evaluation={job.preview} />
       <p>Static admission: <strong>{job.preview.admission.outcome}</strong> · {job.preview.findings.length} finding(s)</p>
       {job.load_error && <div className="error-banner" role="alert">Static analysis is available, but this chart cannot receive the CPU load: {job.load_error}</div>}
       {job.preview.findings.length > 0 && <ul>{job.preview.findings.map((finding) => <li key={finding.id}>{finding.severity}: {finding.title}</li>)}</ul>}

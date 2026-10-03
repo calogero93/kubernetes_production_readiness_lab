@@ -64,5 +64,3 @@ verified load-balanced endpoint is needed for that test.
 After calibration, agree on a target request rate, latency threshold and error
 budget **before** comparing Helm values. Preserve the workload definition,
 target rate, request count, image digest and environment for every candidate.
-The first local exploratory results are recorded in the
-[2026-09-25 calibration note](../../../../docs/experiments/cpu-calibration-2026-09-25.md).

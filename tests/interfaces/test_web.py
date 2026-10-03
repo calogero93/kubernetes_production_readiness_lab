@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from kubeproof.evidence.history import HistoryService
+from kubeproof.interfaces.chart_jobs import ChartJobManager
 from kubeproof.interfaces.live_jobs import LiveJobManager
 from kubeproof.interfaces.web import make_handler
 
@@ -93,12 +94,13 @@ def test_live_preflight_requires_local_csrf_token(
 
     monkeypatch.setattr(live, "prepare", prepare)
 
-    def post(token: str) -> tuple[int, dict[str, object]]:
+    def post(token: str, host: str = "127.0.0.1:8000") -> tuple[int, dict[str, object]]:
         handler = object.__new__(make_handler(service, tmp_path / "dist", live))
         handler.wfile = BytesIO()
         handler.rfile = BytesIO(b"{}")
         handler.path = "/api/live/preflight"
         handler.headers = {
+            "Host": host,
             "X-Kubeproof-CSRF": token,
             "Content-Type": "application/json",
             "Content-Length": "2",
@@ -121,3 +123,45 @@ def test_live_preflight_requires_local_csrf_token(
         assert called == [{}]
     finally:
         live.close()
+
+
+def test_chart_preflight_route_requires_local_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = HistoryService.local(tmp_path / "data")
+    chart = ChartJobManager(service)
+    received: list[dict[str, object]] = []
+
+    def prepare(body: dict[str, object]) -> dict[str, object]:
+        received.append(body)
+        return {"status": "prepared"}
+
+    monkeypatch.setattr(chart, "prepare", prepare)
+
+    def post(token: str, host: str = "127.0.0.1:8000") -> tuple[int, dict[str, object]]:
+        handler = object.__new__(make_handler(service, tmp_path / "dist", chart=chart))
+        handler.wfile = BytesIO()
+        handler.rfile = BytesIO(b"{}")
+        handler.path = "/api/chart/preflight"
+        handler.headers = {
+            "Host": host,
+            "X-Kubeproof-CSRF": token,
+            "Content-Type": "application/json",
+            "Content-Length": "2",
+        }
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "POST /api/chart/preflight HTTP/1.1"
+        handler.client_address = ("127.0.0.1", 0)
+        handler.log_message = lambda *_: None  # type: ignore[method-assign]
+        handler.do_POST()
+        headers, body = handler.wfile.getvalue().split(b"\r\n\r\n", 1)
+        return int(headers.split(b"\r\n", 1)[0].split()[1]), json.loads(body)
+
+    try:
+        assert post(chart.csrf_token, "attacker.example")[0] == HTTPStatus.BAD_REQUEST
+        assert post("wrong")[0] == HTTPStatus.BAD_REQUEST
+        assert received == []
+        assert post(chart.csrf_token) == (HTTPStatus.OK, {"status": "prepared"})
+        assert received == [{}]
+    finally:
+        chart.close()

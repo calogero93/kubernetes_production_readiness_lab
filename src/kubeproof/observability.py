@@ -40,6 +40,12 @@ def route_name(method: str, path: str) -> str:
         return path
     if path.startswith("/api/live/runs/"):
         return "/api/live/runs/{id}/approve" if path.endswith("/approve") else "/api/live/runs/{id}"
+    if path in {"/api/chart/config", "/api/chart/preflight"}:
+        return path
+    if path.startswith("/api/chart/runs/"):
+        if path.endswith("/approve"):
+            return "/api/chart/runs/{id}/approve"
+        return "/api/chart/runs/{id}"
     if path.startswith("/api/evaluations/"):
         return "/api/evaluations/{id}"
     if path == "/":

@@ -1,6 +1,7 @@
 import { Badge } from './Badge'
 import { formatDate, resourceLabel } from '../model'
 import type { Evaluation, Finding, Observation } from '../types'
+import { PlanView } from './PlanView'
 
 type Props = {
   evaluation: Evaluation | null
@@ -25,6 +26,9 @@ function FindingCard({ finding }: { finding: Finding }) {
 }
 
 function ObservationCard({ observation }: { observation: Observation }) {
+  const httpMeasurement = observation.observation_type === 'http.service_probe' && observation.data.measurement && typeof observation.data.measurement === 'object'
+    ? observation.data.measurement as Record<string, unknown>
+    : null
   const measurement = observation.observation_type === 'cpu.bounded_load_trial' && observation.data.measurement && typeof observation.data.measurement === 'object'
     ? observation.data.measurement as Record<string, unknown>
     : null
@@ -39,6 +43,11 @@ function ObservationCard({ observation }: { observation: Observation }) {
       {measurement && (
         <p className="secondary">CPU trial: {String(measurement.achieved_rps ?? '—')} successful req/s · p95 {String(measurement.p95_ms ?? '—')} ms · peak {String(measurement.cpu_millicores ?? '—')} mCPU · goal {observation.data.meets_goal === true ? 'met' : 'not met'}</p>
       )}
+      {httpMeasurement && <>
+        <p className="secondary">HTTP probe: {String(httpMeasurement.requests)} requests · {String(observation.data.failed_requests)} failures · p95 {String(httpMeasurement.p95_ms)} ms · goal {observation.data.meets_goal === true ? 'met' : 'not met'}</p>
+        <p className="secondary">Outcomes: {JSON.stringify(httpMeasurement.outcomes)}</p>
+        <p className="secondary">{String(observation.data.limitation)}</p>
+      </>}
       {observation.provenance && (
         <p className="secondary mono">Source: {observation.provenance.source_ref}</p>
       )}
@@ -83,10 +92,32 @@ export function EvaluationDetail({ evaluation, loading, error, onClose }: Props)
                 <code>{evaluation.evaluation_id}</code>
                 <p>Admission <Badge value={evaluation.admission.outcome} /></p>
                 <p className="secondary">{evaluation.admission.explanation}</p>
+                {evaluation.admission.matched_rule_ids.length > 0 && (
+                  <p className="secondary">Local safety rules: {evaluation.admission.matched_rule_ids.join(', ')}</p>
+                )}
+                {evaluation.admission.approval_scope_sha256 && (
+                  <p className="secondary mono digest">Approval scope: {evaluation.admission.approval_scope_sha256}</p>
+                )}
+                {evaluation.admission.operator_approval && (
+                  <p className="secondary">Accepted by {evaluation.admission.operator_approval.operator_label} (self-declared): {evaluation.admission.operator_approval.reason}</p>
+                )}
                 {evaluation.input.chart_package_sha256 && (
                   <p className="secondary mono digest">Chart SHA-256: {evaluation.input.chart_package_sha256}</p>
                 )}
               </div>
+              <PlanView evaluation={evaluation} />
+              {evaluation.ai_interpretation && <section aria-label="AI interpretation">
+                <h3>AI interpretation · {evaluation.ai_interpretation.status}</h3>
+                <p>Model commentary and suggested changes. Deterministic assessments remain the measured result.</p>
+                {evaluation.ai_interpretation.error && <p>{evaluation.ai_interpretation.error}</p>}
+                {evaluation.ai_interpretation.points.map((point, index) => <article key={index}>
+                  <strong>{point.kind}</strong><p>{point.explanation}</p>
+                  <p>Evidence: {[...point.observation_ids, ...point.check_ids].join(', ')}</p>
+                  {point.suggested_manifest_change && <p>Suggested change: {point.suggested_manifest_change}</p>}
+                  {point.verification && <p>Verify in a new evaluation: {point.verification}</p>}
+                </article>)}
+                {evaluation.ai_interpretation.limitations.map((limit, index) => <p key={index}>{limit}</p>)}
+              </section>}
               <h3 className="section-heading">Checks <span>{evaluation.checks.length}</span></h3>
               <div className="check-list">
                 {evaluation.checks.map((check) => (

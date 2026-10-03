@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -15,9 +17,46 @@ from kubeproof.execution.runtime import (
     ExperimentEvidence,
     _measure_resources,
     _observe_dns,
+    _run_experiment,
     run_runtime,
 )
 from kubeproof.execution.runtime_monitor import MetricsSnapshot
+
+
+@pytest.mark.parametrize(
+    ("ready", "needs_metrics", "executes"),
+    [(True, False, True), (True, True, False), (False, False, False)],
+)
+def test_http_probe_does_not_require_cpu_metrics_but_does_require_readiness(
+    ready: bool,
+    needs_metrics: bool,
+    executes: bool,
+) -> None:
+    calls: list[str] = []
+
+    def run(*args: Any) -> ExperimentEvidence:
+        calls.append("run")
+        return ExperimentEvidence((), (), (), {"artifacts/http/result.json": "{}\n"})
+
+    experiment = SimpleNamespace(
+        check_id="runtime.http_service",
+        title="HTTP Service probe",
+        requires_metrics=needs_metrics,
+        run=run,
+    )
+    result = _run_experiment(
+        experiment,
+        FakeCluster(),
+        Path("config"),
+        "product",
+        SimpleNamespace(triggered=threading.Event()),
+        ready,
+        "Metrics API unavailable",
+        None,
+    )
+    assert bool(calls) is executes
+    if not executes:
+        assert result.checks[0].assessment is Assessment.NOT_TESTED
 
 
 class FakeKind:

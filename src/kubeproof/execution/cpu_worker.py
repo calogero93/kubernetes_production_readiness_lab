@@ -20,6 +20,7 @@ from typing import Any
 from kubeproof.benchmarks.cpu_http.load import LoadCancelled, run_load
 from kubeproof.core.quantities import parse_quantity
 from kubeproof.execution.cpu_fixture import FIXTURE_ROOT, IMAGE
+from kubeproof.execution.errors import TrialInfrastructureError
 from kubeproof.execution.kubernetes import ClusterReader, KubernetesError
 from kubeproof.execution.runtime_monitor import UnsafeWorkloadError
 from kubeproof.intelligence.models import (
@@ -30,7 +31,6 @@ from kubeproof.intelligence.models import (
     TrialRecord,
     TrialStatus,
 )
-from kubeproof.intelligence.workflow import TrialInfrastructureError
 
 _FORWARD = re.compile(r"^Forwarding from 127\.0\.0\.1:(\d+) -> 8080$")
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -11,8 +12,9 @@ import typer
 from pydantic import ValidationError
 
 from kubeproof.application.service import inspect_chart
-from kubeproof.core.domain import Severity
+from kubeproof.core.domain import HttpProbeOptions, OperatorApproval, Severity
 from kubeproof.core.manifests import ManifestError
+from kubeproof.core.plans import EvaluationPlan, PlanBudget
 from kubeproof.core.profile import CompanyProfile, load_profile
 from kubeproof.evidence.bundle import BundleError, verify_bundle
 from kubeproof.evidence.history import HistoryError, HistoryService
@@ -127,6 +129,14 @@ def ai_plan(
     typer.echo(plan.model_dump_json(indent=2))
 
 
+@app.command("catalog")
+def probe_catalog() -> None:
+    """Describe registered probes and the common immutable plan schema."""
+    from kubeproof.execution.probes import catalog_context
+
+    typer.echo(json.dumps(catalog_context(), indent=2))
+
+
 @app.command("probe-service")
 def probe_service(
     service: Annotated[str, typer.Argument(help="Service name in the target namespace.")],
@@ -154,7 +164,7 @@ def probe_service(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(json.dumps(result, indent=2, sort_keys=True))
-    if not result["passed"]:
+    if result["outcomes"] != {"200": requests}:
         raise typer.Exit(code=2)
 
 
@@ -183,6 +193,47 @@ def inspect(
     install_timeout: Annotated[int, typer.Option("--install-timeout", min=30, max=1800)] = 300,
     steady_state_window: Annotated[int, typer.Option("--steady-state-window", min=0, max=600)] = 60,
     max_recovery_targets: Annotated[int, typer.Option("--max-recovery-targets", min=0, max=5)] = 5,
+    approve_local_risk: Annotated[
+        str | None,
+        typer.Option(
+            "--approve-local-risk", help="Approval scope SHA-256 from a static preflight."
+        ),
+    ] = None,
+    operator_label: Annotated[str | None, typer.Option("--operator-label")] = None,
+    approval_reason: Annotated[str | None, typer.Option("--approval-reason")] = None,
+    http_service: Annotated[
+        str | None, typer.Option("--http-service", help="Rendered ClusterIP Service to probe.")
+    ] = None,
+    http_port: Annotated[int, typer.Option("--http-port", min=1, max=65535)] = 80,
+    http_path: Annotated[str, typer.Option("--http-path")] = "/healthz",
+    http_requests: Annotated[int, typer.Option("--http-requests", min=1, max=50)] = 10,
+    http_expected_status: Annotated[
+        int, typer.Option("--http-expected-status", min=100, max=599)
+    ] = 200,
+    http_max_failed_requests: Annotated[
+        int, typer.Option("--http-max-failed-requests", min=0, max=49)
+    ] = 0,
+    http_max_p95_ms: Annotated[float | None, typer.Option("--http-max-p95-ms", min=0.001)] = None,
+    plan_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--plan",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Reviewed immutable probe plan JSON.",
+        ),
+    ] = None,
+    ai_plan: Annotated[
+        bool, typer.Option("--ai-plan", help="Propose a plan during static preflight only.")
+    ] = False,
+    objective: Annotated[str | None, typer.Option("--objective")] = None,
+    plan_max_tasks: Annotated[int, typer.Option("--plan-max-tasks", min=1, max=32)] = 16,
+    plan_max_seconds: Annotated[int, typer.Option("--plan-max-seconds", min=1, max=1800)] = 900,
+    plan_parallelism: Annotated[int, typer.Option("--plan-parallelism", min=1, max=4)] = 1,
+    ai_interpret: Annotated[
+        bool, typer.Option("--ai-interpret", help="Add grounded AI commentary after execution.")
+    ] = False,
     history_dir: Annotated[
         Path | None,
         typer.Option("--history-dir", help="Also import the completed bundle into local history."),
@@ -190,6 +241,49 @@ def inspect(
 ) -> None:
     """Inspect a Helm product, optionally executing a known product in kind."""
     try:
+        if plan_path is not None and http_service is not None:
+            raise ValueError("use --plan or HTTP shorthand, not both")
+        test_plan = (
+            EvaluationPlan.model_validate_json(plan_path.read_bytes()) if plan_path else None
+        )
+        intelligence = None
+        if ai_plan or ai_interpret:
+            from kubeproof.intelligence.evaluation import EvaluationAI
+
+            intelligence = EvaluationAI()
+        if http_service is None and (
+            (http_port, http_path, http_requests, http_expected_status, http_max_failed_requests)
+            != (80, "/healthz", 10, 200, 0)
+            or http_max_p95_ms is not None
+        ):
+            raise ValueError("HTTP probe options require --http-service")
+        http_probe = (
+            HttpProbeOptions(
+                service=http_service,
+                port=http_port,
+                path=http_path,
+                requests=http_requests,
+                expected_status=http_expected_status,
+                max_failed_requests=http_max_failed_requests,
+                max_p95_ms=http_max_p95_ms,
+            )
+            if http_service is not None
+            else None
+        )
+        if (operator_label or approval_reason) and not approve_local_risk:
+            raise ValueError("operator label and reason require --approve-local-risk")
+        if approve_local_risk and (not operator_label or not approval_reason):
+            raise ValueError("local-risk approval requires --operator-label and --approval-reason")
+        approval = (
+            OperatorApproval(
+                operator_label=operator_label or "",
+                reason=approval_reason or "",
+                scope_sha256=approve_local_risk or "",
+                approved_at=datetime.now(UTC),
+            )
+            if approve_local_risk
+            else None
+        )
         profile = load_profile(profile_path)
         evaluation = inspect_chart(
             chart=chart,
@@ -204,8 +298,28 @@ def inspect(
             install_timeout_seconds=install_timeout,
             steady_state_seconds=steady_state_window,
             max_recovery_targets=max_recovery_targets,
+            operator_approval=approval,
+            http_probe=http_probe,
+            test_plan=test_plan,
+            expected_plan_sha256=test_plan.digest() if test_plan else None,
+            plan_generator=intelligence.propose if ai_plan and intelligence else None,
+            planning_objective=objective,
+            plan_budget=PlanBudget(
+                max_tasks=plan_max_tasks,
+                max_elapsed_seconds=plan_max_seconds,
+                max_parallel_tasks=plan_parallelism,
+            ),
+            interpreter=intelligence.interpret if ai_interpret and intelligence else None,
         )
-    except (ValueError, ValidationError, HelmRenderError, ManifestError, BundleError) as exc:
+    except (
+        ImportError,
+        OSError,
+        ValueError,
+        ValidationError,
+        HelmRenderError,
+        ManifestError,
+        BundleError,
+    ) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
@@ -220,6 +334,13 @@ def inspect(
             typer.echo(f"History: {history_dir.resolve()}")
     typer.echo(f"Evaluation bundle: {output.resolve()}")
     typer.echo(f"Admission: {evaluation.admission.outcome}")
+    if evaluation.execution_options.test_plan:
+        typer.echo(f"Frozen plan: {evaluation.execution_options.test_plan.digest()}")
+        typer.echo(f"Plan file: {output.resolve() / 'artifacts/plan/plan.json'}")
+    if evaluation.admission.approval_scope_sha256:
+        typer.echo(
+            f"Local host-access approval scope: {evaluation.admission.approval_scope_sha256}"
+        )
     typer.echo(f"Findings: {blockers} blocker(s), {warnings} warning(s)")
     if blockers:
         raise typer.Exit(code=2)

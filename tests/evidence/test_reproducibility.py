@@ -16,6 +16,7 @@ from kubeproof.core.domain import (
     EvaluationResult,
     ExecutionOptions,
     ExecutionStatus,
+    HttpProbeOptions,
     InputIdentity,
     Observation,
     ObservationProvenance,
@@ -27,6 +28,44 @@ from kubeproof.core.profile import CompanyProfile
 from kubeproof.evidence.bundle import canonical_json_bytes, write_bundle
 from kubeproof.evidence.reproducibility import compare_evaluations, cpu_peak_tolerance
 from kubeproof.interfaces.cli import app
+
+
+def test_http_counts_and_latency_are_compared_even_when_both_checks_pass(
+    strict_profile: CompanyProfile,
+) -> None:
+    base = _evaluation(strict_profile, cpu="0.01", cluster="first")
+    options = base.execution_options.model_copy(
+        update={
+            "http_probe": HttpProbeOptions(service="api", max_p95_ms=500),
+        }
+    )
+    observation = Observation(
+        id="http-obs-00001",
+        check_id="runtime.http_service",
+        source_class=SourceClass.RUNTIME,
+        observation_type="http.service_probe",
+        summary="GET results",
+        data={"measurement": {"outcomes": {"200": 10}, "p95_ms": 20}, "probe_image_id": "same"},
+        provenance=ObservationProvenance(source_ref="environment:kind:first"),
+    )
+    first = base.model_copy(
+        update={
+            "execution_options": options,
+            "observations": (*base.observations, observation),
+        }
+    )
+    changed = observation.model_copy(
+        update={
+            "data": {
+                "measurement": {"outcomes": {"200": 10}, "p95_ms": 200},
+                "probe_image_id": "same",
+            },
+        }
+    )
+    second = first.model_copy(update={"observations": (*base.observations, changed)})
+    result = compare_evaluations(first, second, strict_profile)
+    assert result.status == "different"
+    assert any("HTTP p95" in message for message in result.differences)
 
 
 def _evaluation(

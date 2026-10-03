@@ -8,8 +8,9 @@ from typing import cast
 import pytest
 
 from kubeproof.core.domain import Assessment, ExecutionStatus
+from kubeproof.core.profile import CompanyProfile
 from kubeproof.execution.cpu_fixture import validate_fixture_resources
-from kubeproof.execution.cpu_live import _CpuRun, _report, _run_pilot
+from kubeproof.execution.cpu_live import CpuLiveExperiment, _CpuRun, _report, _run_pilot
 from kubeproof.execution.cpu_worker import CpuLoadWorker
 from kubeproof.execution.helm import HelmRenderRequest
 from kubeproof.execution.kubernetes import ClusterReader
@@ -124,6 +125,20 @@ def test_fixture_contract_accepts_only_selected_image_and_service() -> None:
     container["image"] = "remote/unreviewed:latest"
     with pytest.raises(ValueError, match="local CPU image"):
         validate_fixture_resources(resources, HelmRenderRequest(chart="fixture.tgz"), request())
+
+
+def test_cpu_baseline_preserves_the_confirmed_tool_call_budget(
+    strict_profile: CompanyProfile,
+) -> None:
+    confirmed = request()
+    plan = CpuLiveExperiment(confirmed).baseline_plan(
+        fixture_resources(),
+        HelmRenderRequest(chart="fixture.tgz"),
+        strict_profile,
+    )
+    assert plan.budget.max_tasks == confirmed.budget.max_tool_calls
+    assert len(plan.tasks) == 1
+    assert plan.origin == "deterministic"
 
 
 def test_fixture_contract_rejects_replica_explosion_and_external_service() -> None:

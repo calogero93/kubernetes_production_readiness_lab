@@ -48,9 +48,9 @@ export function buildCpuRequest(input: CpuRequestInput) {
       max_cpu_millicores: input.maxCpu,
     },
     budget: {
-      max_plan_versions: input.useAi ? 5 : 1,
-      max_elapsed_seconds: input.useAi ? 2400 : 1200,
-      max_model_calls: input.useAi ? 6 : 1,
+      max_plan_versions: 1,
+      max_elapsed_seconds: input.useAi ? 1800 : 1200,
+      max_model_calls: 1,
       max_tool_calls: input.useAi ? 15 : 3,
       max_requests_per_trial: 10_000,
     },

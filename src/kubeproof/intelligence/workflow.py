@@ -1,4 +1,4 @@
-"""LangGraph prototype: one plan, deterministic dispatch to capability workers."""
+"""Historical adaptive CPU prototype; the baseline executor is execution.probes."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Annotated, Any, Protocol, TypedDict, cast
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from kubeproof.execution.errors import TrialInfrastructureError as TrialInfrastructureError
 from kubeproof.intelligence.capabilities import CapabilityCatalog, cpu_capabilities
 from kubeproof.intelligence.control import (
     PlanRejected,
@@ -27,10 +28,6 @@ from kubeproof.intelligence.models import (
     TrialRecord,
     TrialStatus,
 )
-
-
-class TrialInfrastructureError(RuntimeError):
-    """A known environmental failure prevented a valid measurement."""
 
 
 class TaskWorker(Protocol):

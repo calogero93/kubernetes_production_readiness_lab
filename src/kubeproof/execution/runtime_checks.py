@@ -211,6 +211,7 @@ def measure_recovery(
             desired = int(spec.get("replicas") if spec.get("replicas") is not None else 1)
             if desired < 1 or len(ready_pods) < desired:
                 continue
+            original_uids = {str(pod.get("metadata", {}).get("uid")) for pod in pods}
             old_name = str(ready_pods[0]["metadata"]["name"])
             old_uid = str(ready_pods[0]["metadata"]["uid"])
             started = time.monotonic()
@@ -225,7 +226,7 @@ def measure_recovery(
                     )
                 for pod in cluster.pods(namespace, selector):
                     status = pod.get("status", {})
-                    if pod.get("metadata", {}).get("uid") == old_uid:
+                    if str(pod.get("metadata", {}).get("uid")) in original_uids:
                         continue
                     if status.get("phase") == "Running" and any(
                         item.get("type") == "Ready" and item.get("status") == "True"

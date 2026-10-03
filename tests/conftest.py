@@ -95,3 +95,29 @@ spec:
             capabilities:
               add: [SYS_ADMIN]
 """
+
+
+@pytest.fixture
+def http_manifest() -> bytes:
+    return b"""\
+apiVersion: v1
+kind: Service
+metadata: {name: api}
+spec:
+  type: ClusterIP
+  selector: {app: api}
+  ports: [{name: http, port: 8080, targetPort: 8080}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: api}}
+  template:
+    metadata: {labels: {app: api}}
+    spec:
+      containers:
+      - name: api
+        image: example/api:1
+"""

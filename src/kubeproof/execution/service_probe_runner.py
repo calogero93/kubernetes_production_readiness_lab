@@ -24,16 +24,17 @@ def probe(host: str, port: int, path: str, requests: int) -> dict[str, object]:
         except (OSError, http.client.HTTPException):
             outcomes["network_error"] += 1
         finally:
-            latencies.append((time.perf_counter() - started) * 1000)
+            latencies.append(round((time.perf_counter() - started) * 1000, 3))
             connection.close()
     ordered = sorted(latencies)
     return {
-        "schema_version": "1",
+        "schema_version": "2",
         "target": f"http://{host}:{port}{path}",
         "requests": requests,
         "outcomes": dict(sorted(outcomes.items())),
+        "latencies_ms": latencies,
         "p95_ms": round(ordered[math.ceil(len(ordered) * 0.95) - 1], 3),
-        "passed": outcomes == {"200": requests},
+        "all_responses_200": outcomes == {"200": requests},
     }
 
 

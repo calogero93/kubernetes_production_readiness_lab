@@ -1,0 +1,110 @@
+{
+  "schema_version": "1",
+  "catalog_version": "1",
+  "origin": "user",
+  "objective": "Verify HTTP and resource sampling, then exercise fixed success/failure branches and Pod recovery.",
+  "budget": {
+    "max_tasks": 8,
+    "max_elapsed_seconds": 300,
+    "max_parallel_tasks": 2
+  },
+  "tasks": [
+    {
+      "id": "http",
+      "capability": "http_service",
+      "rationale": "Check the endpoint while resources are sampled.",
+      "parameters": {
+        "service": "kubeproof-target",
+        "port": 8080,
+        "path": "/",
+        "requests": 5,
+        "expected_status": 200,
+        "max_failed_requests": 0,
+        "max_p95_ms": 500
+      }
+    },
+    {
+      "id": "resources",
+      "capability": "resource_sample",
+      "rationale": "Observe product CPU and memory during the first HTTP probe.",
+      "parameters": {
+        "duration_seconds": 30
+      }
+    },
+    {
+      "id": "expected-error",
+      "capability": "http_service",
+      "depends_on": [
+        "http",
+        "resources"
+      ],
+      "when": "passed",
+      "rationale": "Demonstrate a measured failure without changing the plan.",
+      "parameters": {
+        "service": "kubeproof-target",
+        "port": 8080,
+        "path": "/fail",
+        "requests": 5,
+        "expected_status": 200,
+        "max_failed_requests": 0,
+        "max_p95_ms": 500
+      }
+    },
+    {
+      "id": "after-failure",
+      "capability": "http_service",
+      "depends_on": [
+        "expected-error"
+      ],
+      "when": "failed",
+      "rationale": "Execute a predefined diagnostic health check after the HTTP failure.",
+      "parameters": {
+        "service": "kubeproof-target",
+        "port": 8080,
+        "path": "/healthz",
+        "requests": 5,
+        "expected_status": 200,
+        "max_failed_requests": 0,
+        "max_p95_ms": 500
+      }
+    },
+    {
+      "id": "only-if-success",
+      "capability": "http_service",
+      "depends_on": [
+        "expected-error"
+      ],
+      "when": "passed",
+      "rationale": "Demonstrate a branch that must be skipped.",
+      "parameters": {
+        "service": "kubeproof-target",
+        "port": 8080,
+        "path": "/",
+        "requests": 5,
+        "expected_status": 200,
+        "max_failed_requests": 0,
+        "max_p95_ms": 500
+      }
+    },
+    {
+      "id": "recovery",
+      "capability": "pod_recovery",
+      "depends_on": [
+        "after-failure"
+      ],
+      "rationale": "Measure readiness of an actual new replacement Pod.",
+      "parameters": {
+        "max_targets": 1
+      }
+    },
+    {
+      "id": "dns",
+      "capability": "dns_observation",
+      "depends_on": [
+        "resources"
+      ],
+      "rationale": "Read retained DNS evidence without assuming an external dependency.",
+      "parameters": {}
+    }
+  ]
+}

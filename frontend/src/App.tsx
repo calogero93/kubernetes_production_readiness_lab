@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getEvaluation, listEvaluations, syncEvaluations } from './api'
 import { EvaluationDetail } from './components/EvaluationDetail'
 import { EvaluationList } from './components/EvaluationList'
+import { ChartRun } from './components/ChartRun'
 import { LiveCpuRun } from './components/LiveCpuRun'
 import { filterEvaluations, summarize, type Filter } from './model'
 import type { Evaluation, EvaluationSummary } from './types'
@@ -25,7 +26,7 @@ export default function App() {
   const [detail, setDetail] = useState<Evaluation | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [view, setView] = useState<'history' | 'live'>('history')
+  const [view, setView] = useState<'history' | 'live' | 'chart'>('history')
 
   useEffect(() => {
     let active = true
@@ -94,6 +95,7 @@ export default function App() {
         <div className="nav-caption">Workspace</div>
         <button className={view === 'history' ? 'nav-item nav-item--active' : 'nav-item'} type="button" onClick={() => setView('history')}><span aria-hidden="true">▦</span> Evaluations</button>
         <button className={view === 'live' ? 'nav-item nav-item--active' : 'nav-item'} type="button" onClick={() => setView('live')}><span aria-hidden="true">◉</span> New CPU run</button>
+        <button className={view === 'chart' ? 'nav-item nav-item--active' : 'nav-item'} type="button" onClick={() => setView('chart')}><span aria-hidden="true">▣</span> Review chart</button>
         <div className="sidebar-bottom">
           <span className="online-dot" /> Local history
           <p>Bundles are the source of truth. This view is a rebuildable index.</p>
@@ -104,8 +106,8 @@ export default function App() {
         <header className="page-header">
           <div>
             <span className="eyebrow">{view === 'history' ? 'Overview / local evidence' : 'Experiment / local kind'}</span>
-            <h1>{view === 'history' ? 'Evaluation history' : 'New CPU run'}</h1>
-            <p>{view === 'history' ? 'Trace every outcome back to checks, findings, and observations.' : 'Review the chart and requirements before a real, bounded CPU trial.'}</p>
+            <h1>{view === 'history' ? 'Evaluation history' : view === 'live' ? 'New CPU run' : 'Review Helm chart'}</h1>
+            <p>{view === 'history' ? 'Trace every outcome back to checks, findings, and observations.' : view === 'live' ? 'Review the chart and requirements before a real, bounded CPU trial.' : 'Inspect a chart, review local risks, and approve a kind run.'}</p>
           </div>
           {view === 'history' && <button className="primary-button" type="button" disabled={syncing} onClick={() => void sync()}>
             <span aria-hidden="true">↻</span> {syncing ? 'Syncing…' : 'Resync bundles'}
@@ -114,7 +116,7 @@ export default function App() {
 
         {error && <div className="error-banner" role="alert">{error}</div>}
 
-        {view === 'live' ? <LiveCpuRun onCompleted={showCompleted} /> : <>
+        {view === 'live' ? <LiveCpuRun onCompleted={showCompleted} /> : view === 'chart' ? <ChartRun onCompleted={showCompleted} /> : <>
         <section className="stats-grid" aria-label="History summary">
           <div className="stat-card"><span>Evaluations</span><strong>{loading ? '—' : stats.total}</strong><small>Indexed runs</small></div>
           <div className="stat-card"><span>With blockers</span><strong className="text-bad">{loading ? '—' : stats.blocked}</strong><small>Require attention</small></div>

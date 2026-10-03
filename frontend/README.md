@@ -24,8 +24,8 @@ generated and not committed.
 
 Run `npm test` for frontend tests; `npm run build` also typechecks.
 
-For the first real CPU experiment, install the Python `ai` extra even if you use
-the deterministic pilot, package `examples/charts/cpu-fixture` with Helm, and
-follow the [live CPU UI walkthrough](../docs/experiments/live-cpu-ui.md). Only
-the reviewed CPU fixture contract can receive load in this version; other
-uploaded charts may be inspected statically but cannot be run from this UI.
+For the first real CPU experiment, use the Compose lab described in the
+[project README](../README.md) and select the CPU fixture in the UI. Only the
+reviewed CPU fixture contract can receive CPU load. The **Review chart** view
+also supports generic chart preflight and explicitly approved execution with
+composed probe plans, including HTTP Service probes.

@@ -83,6 +83,7 @@ code, pre { overflow-wrap: anywhere; }
 .badge--admit, .badge--pass { color: #a3ebc9; background: #1c473b; }
 .badge--blocker, .badge--fail, .badge--missing { color: #f6a5ad; background: #502b36; }
 .badge--warning, .badge--static-only { color: #f3cb8a; background: #4d3d2b; }
+.badge--admit-with-operator-approval { color: #f3cb8a; background: #4d3d2b; }
 .badge--inconclusive, .badge--not-tested, .badge--not-applicable { color: #b0bdd1; background: #334155; }
 .empty-state, .state-message { padding: 54px 25px 60px; text-align: center; color: #8ca0ba; font-size: 13px; }
 .empty-state__mark { display: block; color: #6dd9bc; font-size: 34px; }

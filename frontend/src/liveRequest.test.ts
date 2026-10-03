@@ -22,7 +22,7 @@ describe('CPU run request', () => {
     expect(pilot.target_id).toBe('cpu-fixture')
   })
 
-  it('gives the AI supervisor a larger but bounded budget', () => {
+  it('keeps one plan version while allowing a bounded larger AI plan', () => {
     expect(buildCpuRequest(input).budget).toEqual({
       max_plan_versions: 1,
       max_elapsed_seconds: 1200,
@@ -31,9 +31,9 @@ describe('CPU run request', () => {
       max_requests_per_trial: 10_000,
     })
     expect(buildCpuRequest({ ...input, useAi: true }).budget).toEqual({
-      max_plan_versions: 5,
-      max_elapsed_seconds: 2400,
-      max_model_calls: 6,
+      max_plan_versions: 1,
+      max_elapsed_seconds: 1800,
+      max_model_calls: 1,
       max_tool_calls: 15,
       max_requests_per_trial: 10_000,
     })

@@ -9,6 +9,7 @@ import secrets
 import tempfile
 import threading
 import uuid
+from _thread import LockType
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from kubeproof.application.service import inspect_chart
 from kubeproof.core.domain import AdmissionOutcome
 from kubeproof.core.manifests import parse_manifests
+from kubeproof.core.plans import EvaluationPlan
 from kubeproof.core.profile import CompanyProfile
 from kubeproof.evidence.history import HistoryService
 from kubeproof.execution.cpu_fixture import validate_fixture_resources
@@ -87,19 +89,25 @@ def _fixture_settings(request: ConfirmedRequest) -> tuple[str, ...]:
 
 
 def _preview_chart(
-    chart: Path, profile: CompanyProfile, request: ConfirmedRequest, output: Path
+    chart: Path,
+    profile: CompanyProfile,
+    request: ConfirmedRequest,
+    output: Path,
+    *,
+    use_ai: bool = False,
 ) -> tuple[dict[str, Any], str | None]:
     settings = _fixture_settings(request)
+    static_output = output.with_name(output.name + "-static")
     evaluation = inspect_chart(
         chart=str(chart),
         version=None,
         profile=profile,
         values_files=(),
         set_values=settings,
-        output=output,
+        output=static_output,
         execute_known_chart=False,
     )
-    rendered = (output / "input" / "rendered-manifests.redacted.yaml").read_bytes()
+    rendered = (static_output / "input" / "rendered-manifests.redacted.yaml").read_bytes()
     load_error: str | None
     try:
         validate_fixture_resources(
@@ -111,6 +119,21 @@ def _preview_chart(
         load_error = str(exc)
     else:
         load_error = None
+        plan = CpuLiveExperiment(request, use_ai=use_ai).baseline_plan(
+            parse_manifests(rendered),
+            HelmRenderRequest(chart=str(chart), set_values=settings),
+            profile,
+        )
+        evaluation = inspect_chart(
+            chart=str(chart),
+            version=None,
+            profile=profile,
+            values_files=(),
+            set_values=settings,
+            output=output,
+            execute_known_chart=False,
+            test_plan=plan,
+        )
     return evaluation.model_dump(mode="json"), load_error
 
 
@@ -148,11 +171,12 @@ class _Job:
 class LiveJobManager:
     """One local run at a time; the final sealed bundle is stored in history."""
 
-    def __init__(self, history: HistoryService):
+    def __init__(self, history: HistoryService, run_lock: LockType | None = None):
         self.history = history
         self.csrf_token = secrets.token_urlsafe(32)
         self._jobs: dict[str, _Job] = {}
         self._lock = threading.Lock()
+        self._run_lock = run_lock or threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kubeproof-live")
 
     def close(self) -> None:
@@ -170,7 +194,9 @@ class LiveJobManager:
         chart = root / submission.chart_name
         chart.write_bytes(chart_bytes)
         try:
-            preview, load_error = _preview_chart(chart, profile, request, root / "preview")
+            preview, load_error = _preview_chart(
+                chart, profile, request, root / "preview", use_ai=submission.use_ai
+            )
         except Exception:
             directory.cleanup()
             raise
@@ -222,9 +248,18 @@ class LiveJobManager:
             return job.snapshot()
 
     def _run(self, job: _Job) -> None:
+        with self._run_lock:
+            self._run_exclusive(job)
+
+    def _run_exclusive(self, job: _Job) -> None:
         with self._lock:
             job.status = "running"
         try:
+            intelligence = None
+            if job.use_ai:
+                from kubeproof.intelligence.evaluation import EvaluationAI
+
+                intelligence = EvaluationAI()
             evaluation = inspect_chart(
                 chart=str(job.chart),
                 version=None,
@@ -236,7 +271,14 @@ class LiveJobManager:
                 install_timeout_seconds=300,
                 steady_state_seconds=15,
                 max_recovery_targets=0,
-                experiment=CpuLiveExperiment(job.request, use_ai=job.use_ai),
+                test_plan=EvaluationPlan.model_validate(
+                    job.preview["execution_options"]["test_plan"]
+                ),
+                expected_plan_sha256=EvaluationPlan.model_validate(
+                    job.preview["execution_options"]["test_plan"]
+                ).digest(),
+                expected_rendered_manifest_sha256=job.preview["input"]["rendered_manifest_sha256"],
+                interpreter=intelligence.interpret if intelligence else None,
             )
             self.history.import_bundle(Path(job.directory.name) / "final")
         except Exception as exc:

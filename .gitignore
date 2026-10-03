@@ -1,4 +1,5 @@
 .venv/
+.uv-cache/
 __pycache__/
 .pytest_cache/
 .mypy_cache/
@@ -9,7 +10,27 @@ kubeproof-corpus-runs/
 .kubeproof/
 frontend/node_modules/
 frontend/dist/
-docs/private/milestone-1-code-guide.md
-docs/private/milestone-2-code-guide.md
-docs/private/manuale-pratico-kubeproof.md
-docs/private/tutorial-guidato-kubeproof.md
+
+# Local documentation, project notes and agent configuration.
+/docs/
+/AGENTS.md
+/.agents/
+/.codex/
+
+# Personal environment, credentials and workstation configuration.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+/.aws/
+/.kube/
+/.vscode/
+/.idea/
+/compose.override.yaml
+/compose.override.yml
+.DS_Store
+Thumbs.db
+
+# Local evidence bundles contain workstation paths and operator metadata.
+/examples/corpus/evidence/
