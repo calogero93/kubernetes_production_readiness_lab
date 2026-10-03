@@ -34,3 +34,6 @@ Thumbs.db
 
 # Local evidence bundles contain workstation paths and operator metadata.
 /examples/corpus/evidence/
+
+# Temporary CI reports and service logs.
+/ci-artifacts/

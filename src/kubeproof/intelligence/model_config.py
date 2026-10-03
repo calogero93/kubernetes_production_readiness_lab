@@ -24,6 +24,18 @@ class ModelProbeError(ValueError):
     """The configured local model server is unavailable or incompatible."""
 
 
+def _model_timeout(settings: Mapping[str, str]) -> int:
+    try:
+        seconds = int(settings.get("KUBEPROOF_AI_TIMEOUT_SECONDS", "30"))
+    except ValueError as exc:
+        raise ModelConfigurationError(
+            "AI timeout must be an integer from 5 to 600 seconds"
+        ) from exc
+    if not 5 <= seconds <= 600:
+        raise ModelConfigurationError("AI timeout must be an integer from 5 to 600 seconds")
+    return seconds
+
+
 @dataclass(frozen=True)
 class LocalModelStatus:
     """The configured model ID was found on the selected server."""
@@ -141,6 +153,8 @@ def create_chat_model(env: Mapping[str, str] | None = None) -> BaseChatModel:
     if not provider or not model_name:
         raise ModelConfigurationError("KUBEPROOF_AI_PROVIDER and KUBEPROOF_AI_MODEL are required")
 
+    timeout = _model_timeout(settings)
+
     base_url = settings.get("KUBEPROOF_AI_BASE_URL", "").strip()
     if provider in {"openai_compatible", "llama_cpp"}:
         if provider == "openai_compatible" and not base_url:
@@ -159,7 +173,7 @@ def create_chat_model(env: Mapping[str, str] | None = None) -> BaseChatModel:
             model=model_name,
             base_url=endpoint,
             api_key=SecretStr(key or "local-no-key"),
-            timeout=30,
+            timeout=timeout,
             max_retries=0,
         )
 
@@ -175,7 +189,7 @@ def create_chat_model(env: Mapping[str, str] | None = None) -> BaseChatModel:
         return ChatOpenAI(
             model=model_name,
             api_key=SecretStr(key),
-            timeout=30,
+            timeout=timeout,
             max_retries=0,
         )
     if provider != "openai" and "KUBEPROOF_AI_API_KEY" in settings:
@@ -186,7 +200,7 @@ def create_chat_model(env: Mapping[str, str] | None = None) -> BaseChatModel:
         return init_chat_model(
             model_name,
             model_provider=provider,
-            timeout=30,
+            timeout=timeout,
             max_retries=0,
         )
     except (ImportError, ValueError) as exc:

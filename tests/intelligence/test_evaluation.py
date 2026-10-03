@@ -49,3 +49,27 @@ def test_invalid_ai_output_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     with pytest.raises(ValueError):
         EvaluationAI().propose({"objective": "Inspect DNS."})
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        {"kind": "recommendation", "explanation": "Change configuration."},
+        {
+            "kind": "hypothesis",
+            "explanation": "CPU limits could explain the latency.",
+            "check_ids": ["runtime.http_service"],
+            "suggested_manifest_change": "Increase CPU limits.",
+        },
+    ],
+)
+def test_interpretation_rejects_actual_provider_contract_failures(
+    monkeypatch: pytest.MonkeyPatch, point: dict[str, Any]
+) -> None:
+    monkeypatch.setattr("kubeproof.intelligence.evaluation.create_chat_model", lambda: object())
+    monkeypatch.setattr(
+        "kubeproof.intelligence.evaluation._invoke",
+        lambda *_: AIMessage(content=json.dumps({"points": [point]})),
+    )
+    with pytest.raises(ValueError):
+        EvaluationAI().interpret({})

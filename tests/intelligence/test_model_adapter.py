@@ -39,6 +39,30 @@ def test_local_openai_compatible_endpoint_is_configurable() -> None:
     assert model.model_name == "local-model"
 
 
+@pytest.mark.parametrize("timeout", ["5", "300", "600"])
+def test_llama_cpp_accepts_bounded_cpu_inference_timeout(timeout: str) -> None:
+    model = create_chat_model(
+        {
+            "KUBEPROOF_AI_PROVIDER": "llama_cpp",
+            "KUBEPROOF_AI_MODEL": "selected-gguf",
+            "KUBEPROOF_AI_TIMEOUT_SECONDS": timeout,
+        }
+    )
+    assert model.request_timeout == int(timeout)
+
+
+@pytest.mark.parametrize("timeout", ["4", "601", "nan", "30.5", ""])
+def test_llama_cpp_rejects_invalid_inference_timeout(timeout: str) -> None:
+    with pytest.raises(ModelConfigurationError, match="timeout"):
+        create_chat_model(
+            {
+                "KUBEPROOF_AI_PROVIDER": "llama_cpp",
+                "KUBEPROOF_AI_MODEL": "selected-gguf",
+                "KUBEPROOF_AI_TIMEOUT_SECONDS": timeout,
+            }
+        )
+
+
 def test_llama_cpp_uses_loopback_default_without_pinning_model() -> None:
     model = create_chat_model(
         {"KUBEPROOF_AI_PROVIDER": "llama_cpp", "KUBEPROOF_AI_MODEL": "selected-gguf"}

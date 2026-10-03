@@ -18,3 +18,4 @@ frontend/dist
 docs
 examples/corpus
 tests
+ci-artifacts

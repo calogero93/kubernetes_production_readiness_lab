@@ -12,9 +12,19 @@ from kubeproof.core.probe_options import StrictModel
 class InterpretationPoint(StrictModel):
     kind: Literal["observed", "hypothesis", "recommendation"]
     explanation: str = Field(min_length=1, max_length=4000)
-    observation_ids: tuple[str, ...] = ()
-    check_ids: tuple[str, ...] = ()
-    suggested_manifest_change: str | None = Field(default=None, max_length=4000)
+    observation_ids: tuple[str, ...] = Field(
+        default=(),
+        description="Existing evidence IDs. At least one observation_ids or check_ids is required.",
+    )
+    check_ids: tuple[str, ...] = Field(
+        default=(),
+        description="Existing check IDs. At least one observation_ids or check_ids is required.",
+    )
+    suggested_manifest_change: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="Only for kind=recommendation; use null for observed or hypothesis points.",
+    )
     verification: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")

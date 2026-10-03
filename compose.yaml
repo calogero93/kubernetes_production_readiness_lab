@@ -1,9 +1,57 @@
 services:
+  model-download:
+    profiles: [ai]
+    image: python:3.12-slim-bookworm
+    volumes:
+      - ./scripts/ai/download_model.py:/setup/download_model.py:ro
+      - ./examples/ai/model.json:/setup/model.json:ro
+      - kubeproof-models:/models
+    command: [python, /setup/download_model.py]
+
+  llama-server:
+    profiles: [ai]
+    image: ghcr.io/ggml-org/llama.cpp:server-b10524
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - kubeproof-models:/models:ro
+    command:
+      - --model
+      - /models/model.gguf
+      - --alias
+      - kubeproof-local
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - "16384"
+      - --parallel
+      - "1"
+      - --threads
+      - "8"
+      - --n-gpu-layers
+      - "0"
+      - --jinja
+      - --temp
+      - "0"
+
+  workflow-checks:
+    profiles: [checks]
+    image: rhysd/actionlint:1.7.12
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace:ro
+    network_mode: none
+    command: [-color, .github/workflows/ci.yml]
+
   checks:
     profiles: [checks]
     build:
       context: .
       target: verification
+    environment:
+      RUFF_CACHE_DIR: /tmp/ruff-cache
     volumes:
       - ./:/workspace:ro
     command: [pytest, -q, -p, "no:cacheprovider"]
@@ -14,6 +62,33 @@ services:
       context: .
       target: frontend
     command: [npm, test, --, --run]
+
+  image-checks:
+    profiles: [checks]
+    build:
+      context: .
+      target: production
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    tmpfs:
+      - /data:uid=10001,gid=10001,mode=0700
+      - /tmp:uid=10001,gid=10001,mode=1777
+    volumes:
+      - ./examples/charts/http-fixture:/fixtures/http-fixture:ro
+      - ./examples/profiles:/fixtures/profiles:ro
+      - ./examples/plans:/fixtures/plans:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2).read()"
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
 
   local-lab:
     build:
@@ -29,6 +104,7 @@ services:
       KUBEPROOF_AI_MODEL: ${KUBEPROOF_AI_MODEL:-}
       KUBEPROOF_AI_BASE_URL: ${KUBEPROOF_AI_BASE_URL:-}
       KUBEPROOF_AI_API_KEY: ${KUBEPROOF_AI_API_KEY:-}
+      KUBEPROOF_AI_TIMEOUT_SECONDS: ${KUBEPROOF_AI_TIMEOUT_SECONDS:-30}
     volumes:
       - ./:/workspace:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -47,3 +123,4 @@ services:
 
 volumes:
   kubeproof-data:
+  kubeproof-models:
